@@ -26,11 +26,7 @@ const sessionConfig = {
     session: {
       modalities: ['text'],
       instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
-      voice: null,
-      input_audio_format: null,
-      output_audio_format: null,
-      input_audio_transcription: null,
-      turn_detection: null
+      voice: 'alloy'
     }
   };
 
