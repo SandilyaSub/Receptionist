@@ -75,7 +75,7 @@ wss.on('connection', (ws, req) => {
     
     // Use the model as a query parameter in the URL as seen in the Twilio demo
     const url = new URL('wss://api.openai.com/v1/realtime');
-    url.searchParams.append('model', 'gpt-4o-realtime-preview-2024-06-03');
+    url.searchParams.append('model', 'gpt-4o-realtime-preview');
     console.log(`[${clientIp}] Connecting to OpenAI with URL: ${url.href}`);
     
     const openaiWs = new WebSocket(url.href, {
@@ -275,4 +275,3 @@ process.on('SIGINT', () => {
 setInterval(() => {
   console.log(`Active connections: ${connections.size}`);
 }, 60000); // Log every minute
-
