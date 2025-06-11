@@ -142,68 +142,59 @@ wss.on('connection', (ws, req) => {
   connectToOpenAI(); // Connect to OpenAI when client connects
 
   ws.on('message', (message) => {
-    const messageType = typeof message;
-    const isBuffer = Buffer.isBuffer(message);
-    const messageLength = isBuffer ? message.length : (message.length || 'N/A');
+    const clientIp = connectionState.clientIp;
 
-    console.log(`[${clientIp}] Received message from Client. Type: ${messageType}, IsBuffer: ${isBuffer}, Length: ${messageLength}`);
-    
-    // Parse message if it's a string to detect special message types
-    if (messageType === 'string' || !isBuffer) {
-      try {
-        const parsedMessage = JSON.parse(message);
-        console.log(`[${clientIp}] Client message type: ${parsedMessage.type || 'unknown'}`);
-        
-        // Handle special message types
-        if (parsedMessage.type === 'mode_switch' && parsedMessage.mode) {
-          // Allow client to switch between text and audio modes
-          connectionState.isAudioMode = parsedMessage.mode === 'audio';
-          console.log(`[${clientIp}] Switched to ${connectionState.isAudioMode ? 'audio' : 'text'} mode`);
-          
-          // If we have an active OpenAI connection, update the session
-          if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
-            const sessionConfig = connectionState.isAudioMode ? audioSessionConfig : textSessionConfig;
-            connectionState.openaiWs.send(JSON.stringify(sessionConfig));
-            console.log(`[${clientIp}] Updated session configuration for ${connectionState.isAudioMode ? 'audio' : 'text'} mode`);
-          }
-          
-          // Acknowledge the mode switch to the client
-          ws.send(JSON.stringify({
-            type: 'mode_switched',
-            mode: connectionState.isAudioMode ? 'audio' : 'text'
-          }));
-          
-          return; // Don't forward mode switch messages to OpenAI
+    // 1. Handle Audio Buffers
+    if (Buffer.isBuffer(message)) {
+      if (connectionState.isAudioMode) {
+        if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+          connectionState.openaiWs.send(message);
+        } else {
+          console.log(`[${clientIp}] Audio received but OpenAI WS not ready. Discarding.`);
         }
-      } catch (e) {
-        // Not JSON or parsing error, continue with normal processing
-      }
-    }
-    
-    // Process audio buffer messages correctly in audio mode
-    if (isBuffer && connectionState.isAudioMode) {
-      if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
-        // For audio buffers in audio mode, wrap them in the correct format
-        const audioMessage = JSON.stringify({
-          type: 'input_audio_buffer.append',
-          audio: message.toString('base64')
-        });
-        connectionState.openaiWs.send(audioMessage);
-        console.log(`[${clientIp}] Forwarded audio buffer to OpenAI.`);
       } else {
-        console.log(`[${clientIp}] OpenAI WebSocket not ready. Queuing audio buffer.`);
-        connectionState.messageQueue.push(message);
+        console.log(`[${clientIp}] Received audio buffer in text-only mode. Ignoring.`);
       }
-      return;
+      return; // End of handling for this message
     }
-    
-    // Queue messages if OpenAI connection is not ready, otherwise send directly
-    if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
-      connectionState.openaiWs.send(message);
-      console.log(`[${clientIp}] Forwarded message to OpenAI.`);
-    } else {
-      console.log(`[${clientIp}] OpenAI WebSocket not ready. Queuing message.`);
-      connectionState.messageQueue.push(message);
+
+    // 2. Handle JSON Control Messages
+    try {
+      const parsedMessage = JSON.parse(message);
+      console.log(`[${clientIp}] Received JSON message. Type: ${parsedMessage.type}`);
+
+      if (parsedMessage.type === 'mode_switch' && parsedMessage.mode) {
+        // Handle mode switch
+        connectionState.isAudioMode = parsedMessage.mode === 'audio';
+        console.log(`[${clientIp}] Switching to ${connectionState.isAudioMode ? 'audio' : 'text'} mode.`);
+        if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+          const sessionConfig = connectionState.isAudioMode ? audioSessionConfig : textSessionConfig;
+          connectionState.openaiWs.send(JSON.stringify(sessionConfig));
+          console.log(`[${clientIp}] Sent session update for ${parsedMessage.mode} mode.`);
+        }
+        ws.send(JSON.stringify({ type: 'mode_switched', mode: parsedMessage.mode }));
+
+      } else if (parsedMessage.type === 'user_audio_end') {
+        // Handle end of user audio
+        console.log(`[${clientIp}] Client signaled end of audio stream.`);
+        if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+          const endMessage = { type: 'message', role: 'user', status: 'done' };
+          connectionState.openaiWs.send(JSON.stringify(endMessage));
+          console.log(`[${clientIp}] Sent user 'done' message to OpenAI.`);
+        }
+
+      } else {
+        // Forward other JSON messages (e.g., text input)
+        if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+          console.log(`[${clientIp}] Forwarding message to OpenAI:`, JSON.stringify(parsedMessage));
+          connectionState.openaiWs.send(JSON.stringify(parsedMessage));
+        } else {
+          console.log(`[${clientIp}] OpenAI WS not ready. Queuing message.`);
+          connectionState.messageQueue.push(JSON.stringify(parsedMessage));
+        }
+      }
+    } catch (e) {
+      console.error(`[${clientIp}] Failed to parse incoming message as JSON. Error: ${e.message}. Message: ${message.toString()}`);
     }
   });
 
