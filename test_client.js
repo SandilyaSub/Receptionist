@@ -9,39 +9,39 @@ const ws = new WebSocket(WSS_URL);
 
 ws.on('open', () => {
   console.log('Connected to WebSocket server.');
-
-  // Send a test message (text for now)
-  // Your server.js currently forwards raw messages. OpenAI expects JSON for session config,
-  // but for text interaction after session config, it might accept raw text or specific JSON.
-  // Let's start with a simple text message. If this doesn't work, we might need to send JSON.
-  const testMessage = "Hello Bakery, I would like to ask about your cakes.";
-  console.log(`Sending message: "${testMessage}"`);
-  ws.send(testMessage);
+  // We will now wait for the session to be confirmed before sending a message.
 });
 
 ws.on('message', (data) => {
   console.log('Received message from server:');
-  // Try to parse as JSON if it looks like it, otherwise print as string
+  let message;
   try {
-    const jsonData = JSON.parse(data.toString());
-    console.log(JSON.stringify(jsonData, null, 2));
+    message = JSON.parse(data);
+    console.log(JSON.stringify(message, null, 2));
   } catch (e) {
-    console.log(data.toString());
+    console.log('Received non-JSON message:', data);
+    return;
+  }
+
+  // FIX: Wait for the session to be fully configured before sending our prompt.
+  if (message.type === 'session.updated') {
+    console.log('Session is updated and ready. Sending text input...');
+    const testMessage = {
+      type: 'text.input',
+      text: 'Hello Bakery, I would like to ask about your cakes.'
+    };
+    console.log(`Sending message: ${JSON.stringify(testMessage, null, 2)}`);
+    ws.send(JSON.stringify(testMessage));
   }
 });
 
 ws.on('error', (error) => {
-  console.error('WebSocket error:', error.message);
+  console.error('WebSocket error:', error);
 });
 
-ws.on('close', (code, reason) => {
-  console.log(`WebSocket connection closed. Code: ${code}, Reason: ${reason ? reason.toString() : 'No reason given'}`);
+ws.on('close', () => {
+  console.log('WebSocket connection closed.');
 });
-
-// To keep the client running for a bit to receive messages, otherwise it might exit immediately.
-// You can manually close it with Ctrl+C after testing.
-// setTimeout(() => {
-//   if (ws.readyState === WebSocket.OPEN) {
 //     console.log('Closing client after timeout.');
 //     ws.close();
 //   }

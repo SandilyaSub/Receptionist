@@ -24,7 +24,7 @@ console.log('Server is ready to accept connections');
 const sessionConfig = {
     type: 'session.update',
     session: {
-      modalities: ['text', 'audio'],
+      modalities: ['text'],
       instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
       voice: 'alloy',
       input_audio_format: 'pcm16', // Crucial: Does Exotel send this?
