@@ -143,17 +143,19 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (message) => {
     const clientIp = connectionState.clientIp;
+    const timestamp = new Date().toISOString();
 
     // 1. Handle Audio Buffers
     if (Buffer.isBuffer(message)) {
+      console.log(`[${clientIp} @ ${timestamp}] Received raw BUFFER (length: ${message.length}). Current mode: ${connectionState.isAudioMode ? 'audio' : 'text'}.`);
       if (connectionState.isAudioMode) {
         if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
           connectionState.openaiWs.send(message);
         } else {
-          console.log(`[${clientIp}] Audio received but OpenAI WS not ready. Discarding.`);
+          console.log(`[${clientIp} @ ${timestamp}] Audio buffer received but OpenAI WS not ready. Discarding.`);
         }
       } else {
-        console.log(`[${clientIp}] Received audio buffer in text-only mode. Ignoring.`);
+        console.log(`[${clientIp} @ ${timestamp}] Audio buffer received in text-only mode. Ignoring.`);
       }
       return; // End of handling for this message
     }
@@ -161,7 +163,7 @@ wss.on('connection', (ws, req) => {
     // 2. Handle JSON Control Messages
     try {
       const parsedMessage = JSON.parse(message);
-      console.log(`[${clientIp}] Received JSON message. Type: ${parsedMessage.type}`);
+      console.log(`[${clientIp} @ ${timestamp}] Received JSON message. Type: ${parsedMessage.type}. Current mode: ${connectionState.isAudioMode ? 'audio' : 'text'}.`);
 
       if (parsedMessage.type === 'mode_switch' && parsedMessage.mode) {
         // Handle mode switch

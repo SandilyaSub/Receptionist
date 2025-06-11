@@ -30,24 +30,25 @@ ws.on('message', (data) => {
 
     switch (message.type) {
       case 'session.updated':
-        if (!sessionReady) { // Process only once
+        if (!sessionReady) {
             console.log('Session is ready. Requesting to switch to audio mode...');
             sessionReady = true;
-            // We only send the mode switch request here.
-            // We will start streaming audio only AFTER the server confirms the switch.
-            sendModeSwitch('audio');
+            sendModeSwitch('audio'); // Only send the request, don't stream yet.
         }
         break;
       case 'mode_switched':
-        if (message.mode === 'audio' && !modeSwitched) { // Process only once
-          console.log('Mode switched to audio by server. NOW starting to stream audio file...');
-          modeSwitched = true;
-          streamAudioFile(); // Audio streaming starts only after server confirmation.
-        } else if (message.mode === 'audio' && modeSwitched) {
-          // Potentially a duplicate message, or a re-confirmation. Safe to ignore if already switched.
-          console.log('Already in audio mode. Ignoring redundant mode_switched message.');
-        } else if (message.mode !== 'audio'){
+        if (message.mode === 'audio') {
+          if (!modeSwitched) {
+            console.log('Mode switched to audio by server. NOW starting to stream audio file...');
+            modeSwitched = true;
+            streamAudioFile(); // Stream only after confirmed switch and not already switched.
+          } else {
+            console.log('Already in audio mode. Ignoring redundant mode_switched message.');
+          }
+        } else {
           console.warn(`Server switched to unexpected mode: ${message.mode}`);
+          // If server switches to text, we should stop audio streaming if it somehow started.
+          // For now, this is unlikely given the flow, but good for future robustness.
         }
         break;
       case 'response.output_item.done': // This is a JSON message from OpenAI
