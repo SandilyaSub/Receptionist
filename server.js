@@ -1,7 +1,6 @@
 // server.js (with enhanced logging)
 const WebSocket = require('ws');
-// const http = require('http');
-const { URL } = require('url'); // Not used if Railway handles SSL termination
+const { URL } = require('url');
 
 const PORT = process.env.PORT || 8080;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -50,8 +49,7 @@ wss.on('connection', (ws, req) => {
 
   const connectToOpenAI = () => {
     console.log(`[${clientIp}] Attempting to connect to OpenAI Realtime API...`);
-    // FIX: Updated model name based on documentation search. Removed date suffix.
-        // FIX: Using robust URL construction and the model name from the API's error message.
+    // FIX: Using robust URL construction and the model name from the API's error message.
     const url = new URL('wss://api.openai.com/v1/realtime');
     url.searchParams.append('model', 'gpt-4o-realtime-preview');
     openaiWs = new WebSocket(url.href, {
