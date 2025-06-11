@@ -20,59 +20,102 @@ const wss = new WebSocket.Server({
 console.log(`Bakery Bot WebSocket Server running on port ${PORT}`);
 console.log('Server is ready to accept connections');
 
-// Define sessionConfig globally or pass it appropriately
-const sessionConfig = {
-    type: 'session.update',
-    session: {
-      modalities: ['text'],
-      instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
-      voice: 'alloy'
-    }
-  };
+// Define session configurations based on modality
+const textSessionConfig = {
+  type: 'session.update',
+  session: {
+    modalities: ['text'],
+    instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
+    voice: 'alloy' // Keep voice parameter as it's required by the API
+  }
+};
+
+// Audio session config for when we integrate with Exotel
+const audioSessionConfig = {
+  type: 'session.update',
+  session: {
+    modalities: ['text', 'audio'],
+    instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
+    voice: 'alloy',
+    input_audio_format: 'pcm16', // Update this to match Exotel's format when known
+    output_audio_format: 'pcm16',
+    turn_detection: { type: 'server_vad' },
+    input_audio_transcription: { model: 'whisper-1' }
+  }
+};
+
+// Track all active connections
+const connections = new Map();
 
 wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress || req.headers['x-forwarded-for'] || 'Unknown IP';
   console.log(`[${clientIp}] New client connected.`);
   console.log(`[${clientIp}] Request Headers: ${JSON.stringify(req.headers, null, 2)}`);
 
+  // Create a unique connection ID
+  const connectionId = Date.now().toString();
+  
+  // Initialize connection state
+  const connectionState = {
+    clientWs: ws,
+    openaiWs: null,
+    messageQueue: [],
+    isAudioMode: false, // Default to text mode for now
+    clientIp
+  };
+  
+  connections.set(connectionId, connectionState);
+
   // Send a welcome message to the client
   ws.send(JSON.stringify({ type: "connection_established", message: "Connected to Bakery Bot Server" }));
   console.log(`[${clientIp}] Sent initial connection established message.`);
 
-  let openaiWs = null;
-  const messageQueue = []; // Queue for messages that arrive before OpenAI is ready
-
   const connectToOpenAI = () => {
     console.log(`[${clientIp}] Attempting to connect to OpenAI Realtime API...`);
-    // FIX: Correcting model date to 2024 and logging the final URL.
+    
+    // Use the model as a query parameter in the URL as seen in the Twilio demo
     const url = new URL('wss://api.openai.com/v1/realtime');
     url.searchParams.append('model', 'gpt-4o-realtime-preview-2024-06-03');
     console.log(`[${clientIp}] Connecting to OpenAI with URL: ${url.href}`);
-    openaiWs = new WebSocket(url.href, {
+    
+    const openaiWs = new WebSocket(url.href, {
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'realtime=v1'
+        'OpenAI-Beta': 'realtime=v1' // Important header from Twilio demo
       }
     });
+    
+    connectionState.openaiWs = openaiWs;
 
     openaiWs.on('open', () => {
       console.log(`[${clientIp}] Successfully connected to OpenAI Realtime API.`);
+      
+      // Use the appropriate session config based on mode
+      const sessionConfig = connectionState.isAudioMode ? audioSessionConfig : textSessionConfig;
       openaiWs.send(JSON.stringify(sessionConfig));
-      console.log(`[${clientIp}] Sent session configuration to OpenAI.`);
+      console.log(`[${clientIp}] Sent ${connectionState.isAudioMode ? 'audio' : 'text'} session configuration to OpenAI.`);
 
-      // FIX: Process any queued messages now that the connection is open
-      console.log(`[${clientIp}] Processing ${messageQueue.length} queued messages.`);
-      while (messageQueue.length > 0) {
-        const queuedMessage = messageQueue.shift();
+      // Process any queued messages now that the connection is open
+      console.log(`[${clientIp}] Processing ${connectionState.messageQueue.length} queued messages.`);
+      while (connectionState.messageQueue.length > 0) {
+        const queuedMessage = connectionState.messageQueue.shift();
         openaiWs.send(queuedMessage);
         console.log(`[${clientIp}] Sent queued message to OpenAI.`);
       }
     });
 
     openaiWs.on('message', (data) => {
-      // console.log(`[${clientIp}] Received message from OpenAI...`);
       if (ws.readyState === WebSocket.OPEN) {
         try {
+          // Log important message types for debugging
+          try {
+            const parsedData = JSON.parse(data.toString());
+            console.log(`[${clientIp}] Received message from OpenAI: ${parsedData.type || 'unknown type'}`);
+          } catch (e) {
+            // If it's not JSON (like audio buffer), don't log the content
+            console.log(`[${clientIp}] Received binary data from OpenAI`);
+          }
+          
           ws.send(data);
         } catch (e) {
           console.error(`[${clientIp}] ERROR forwarding OpenAI message to client:`, e);
@@ -96,7 +139,7 @@ wss.on('connection', (ws, req) => {
     });
   };
 
-  connectToOpenAI(); // Connect to OpenAI when Exotel connects
+  connectToOpenAI(); // Connect to OpenAI when client connects
 
   ws.on('message', (message) => {
     const messageType = typeof message;
@@ -105,30 +148,93 @@ wss.on('connection', (ws, req) => {
 
     console.log(`[${clientIp}] Received message from Client. Type: ${messageType}, IsBuffer: ${isBuffer}, Length: ${messageLength}`);
     
-    // FIX: Queue messages if OpenAI connection is not ready, otherwise send directly.
-    if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-      openaiWs.send(message);
+    // Parse message if it's a string to detect special message types
+    if (messageType === 'string' || !isBuffer) {
+      try {
+        const parsedMessage = JSON.parse(message);
+        console.log(`[${clientIp}] Client message type: ${parsedMessage.type || 'unknown'}`);
+        
+        // Handle special message types
+        if (parsedMessage.type === 'mode_switch' && parsedMessage.mode) {
+          // Allow client to switch between text and audio modes
+          connectionState.isAudioMode = parsedMessage.mode === 'audio';
+          console.log(`[${clientIp}] Switched to ${connectionState.isAudioMode ? 'audio' : 'text'} mode`);
+          
+          // If we have an active OpenAI connection, update the session
+          if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+            const sessionConfig = connectionState.isAudioMode ? audioSessionConfig : textSessionConfig;
+            connectionState.openaiWs.send(JSON.stringify(sessionConfig));
+            console.log(`[${clientIp}] Updated session configuration for ${connectionState.isAudioMode ? 'audio' : 'text'} mode`);
+          }
+          
+          // Acknowledge the mode switch to the client
+          ws.send(JSON.stringify({
+            type: 'mode_switched',
+            mode: connectionState.isAudioMode ? 'audio' : 'text'
+          }));
+          
+          return; // Don't forward mode switch messages to OpenAI
+        }
+      } catch (e) {
+        // Not JSON or parsing error, continue with normal processing
+      }
+    }
+    
+    // Process audio buffer messages correctly in audio mode
+    if (isBuffer && connectionState.isAudioMode) {
+      if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+        // For audio buffers in audio mode, wrap them in the correct format
+        const audioMessage = JSON.stringify({
+          type: 'input_audio_buffer.append',
+          audio: message.toString('base64')
+        });
+        connectionState.openaiWs.send(audioMessage);
+        console.log(`[${clientIp}] Forwarded audio buffer to OpenAI.`);
+      } else {
+        console.log(`[${clientIp}] OpenAI WebSocket not ready. Queuing audio buffer.`);
+        connectionState.messageQueue.push(message);
+      }
+      return;
+    }
+    
+    // Queue messages if OpenAI connection is not ready, otherwise send directly
+    if (connectionState.openaiWs && connectionState.openaiWs.readyState === WebSocket.OPEN) {
+      connectionState.openaiWs.send(message);
       console.log(`[${clientIp}] Forwarded message to OpenAI.`);
     } else {
       console.log(`[${clientIp}] OpenAI WebSocket not ready. Queuing message.`);
-      messageQueue.push(message);
+      connectionState.messageQueue.push(message);
     }
   });
 
   ws.on('close', (code, reason) => {
     console.log(`[${clientIp}] Client disconnected. Code: ${code}, Reason: ${reason ? reason.toString() : 'N/A'}`);
-    if (openaiWs) {
+    
+    // Clean up OpenAI connection
+    if (connectionState.openaiWs) {
       console.log(`[${clientIp}] Closing OpenAI connection due to client disconnect.`);
-      openaiWs.close();
+      connectionState.openaiWs.close();
+      connectionState.openaiWs = null;
     }
+    
+    // Remove from connections map
+    connections.delete(connectionId);
+    console.log(`[${clientIp}] Connection removed. Active connections: ${connections.size}`);
   });
 
   ws.on('error', (error) => {
     console.error(`[${clientIp}] Client WebSocket error:`, error);
-    if (openaiWs) {
+    
+    // Clean up OpenAI connection
+    if (connectionState.openaiWs) {
       console.log(`[${clientIp}] Closing OpenAI connection due to client error.`);
-      openaiWs.close();
+      connectionState.openaiWs.close();
+      connectionState.openaiWs = null;
     }
+    
+    // Remove from connections map
+    connections.delete(connectionId);
+    console.log(`[${clientIp}] Connection removed due to error. Active connections: ${connections.size}`);
   });
 });
 
@@ -136,13 +242,37 @@ wss.on('error', (error) => {
   console.error('WebSocket Server Global Error:', error.message, error.code || '');
 });
 
+// Function to clean up all connections
+function cleanupAllConnections() {
+  console.log(`Cleaning up all connections. Active count: ${connections.size}`);
+  
+  for (const [id, connection] of connections.entries()) {
+    if (connection.openaiWs) {
+      connection.openaiWs.close();
+    }
+    if (connection.clientWs) {
+      connection.clientWs.close();
+    }
+    connections.delete(id);
+  }
+  
+  console.log('All connections cleaned up.');
+}
+
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM, shutting down gracefully');
+  cleanupAllConnections();
   wss.close();
 });
 
 process.on('SIGINT', () => {
   console.log('Received SIGINT, shutting down gracefully');
+  cleanupAllConnections();
   wss.close();
 });
+
+// Log active connections periodically
+setInterval(() => {
+  console.log(`Active connections: ${connections.size}`);
+}, 60000); // Log every minute
 
