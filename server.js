@@ -26,9 +26,7 @@ const sessionConfig = {
     session: {
       modalities: ['text'],
       instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
-      voice: 'alloy',
       input_audio_format: 'pcm16', // Crucial: Does Exotel send this?
-      output_audio_format: 'pcm16',
       input_audio_transcription: {
         model: 'whisper-1'
       }
