@@ -49,9 +49,10 @@ wss.on('connection', (ws, req) => {
 
   const connectToOpenAI = () => {
     console.log(`[${clientIp}] Attempting to connect to OpenAI Realtime API...`);
-    // FIX: Using robust URL construction and the model name from the API's error message.
+    // FIX: Correcting model date to 2024 and logging the final URL.
     const url = new URL('wss://api.openai.com/v1/realtime');
-    url.searchParams.append('model', 'gpt-4o-realtime-preview');
+    url.searchParams.append('model', 'gpt-4o-realtime-preview-2024-06-03');
+    console.log(`[${clientIp}] Connecting to OpenAI with URL: ${url.href}`);
     openaiWs = new WebSocket(url.href, {
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
