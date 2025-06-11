@@ -50,7 +50,7 @@ wss.on('connection', (ws, req) => {
 
   const connectToOpenAI = () => {
     console.log(`[${clientIp}] Attempting to connect to OpenAI Realtime API...`);
-    const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01'; // Consider making model configurable
+    const url = 'wss://api.openai.com/v1/realtime?gpt-4o-realtime-preview-2025-06-03'; // Consider making model configurable
 
     openaiWs = new WebSocket(url, {
       headers: {
