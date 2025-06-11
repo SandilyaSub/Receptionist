@@ -27,8 +27,15 @@ ws.on('message', (data) => {
   if (message.type === 'session.updated') {
     console.log('Session is updated and ready. Sending text input...');
     const testMessage = {
-      type: 'input_text',
-      text: 'Hello Bakery, I would like to ask about your cakes.'
+      type: 'message',
+      role: 'user',
+      status: 'in_progress',
+      content: [
+        {
+          type: 'input_text',
+          text: 'Hello Bakery, I would like to ask about your cakes.'
+        }
+      ]
     };
     console.log(`Sending message: ${JSON.stringify(testMessage, null, 2)}`);
     ws.send(JSON.stringify(testMessage));
