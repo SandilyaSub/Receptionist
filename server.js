@@ -1,170 +1,130 @@
 
 const WebSocket = require('ws');
-const http = require('http');
-const OpenAI = require('openai');
+const https = require('https');
 
-// Configuration
-const PORT = process.env.PORT || 3000;
+// Use Railway's PORT environment variable, fallback to 8080 for local development
+const PORT = process.env.PORT || 8080;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 if (!OPENAI_API_KEY) {
-  console.error('OPENAI_API_KEY environment variable is required');
+  console.error('ERROR: OPENAI_API_KEY environment variable is required');
   process.exit(1);
 }
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
-
-// Create HTTP server
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bakery Bot WebSocket Server is running!');
-});
-
-// Create WebSocket server
-const wss = new WebSocket.Server({ server });
-
 console.log('Starting Bakery Bot WebSocket Server...');
 
+// Create WebSocket server - listen on all interfaces for Railway
+const wss = new WebSocket.Server({ 
+  port: PORT,
+  host: '0.0.0.0'
+});
+
+console.log(`Bakery Bot WebSocket Server running on port ${PORT}`);
+console.log('Server is ready to accept connections');
+
+// Handle new WebSocket connections
 wss.on('connection', (ws, req) => {
-  console.log('New WebSocket connection from:', req.socket.remoteAddress);
+  console.log('New client connected from:', req.socket.remoteAddress);
   
   let openaiWs = null;
   
-  // Initialize OpenAI WebSocket connection
-  const initOpenAI = () => {
-    try {
-      openaiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'realtime=v1',
-        },
-      });
-
-      openaiWs.on('open', () => {
-        console.log('Connected to OpenAI Realtime API');
-        
-        // Configure the session for bakery bot
-        const sessionConfig = {
-          type: 'session.update',
-          session: {
-            modalities: ['text', 'audio'],
-            instructions: `You are a helpful bakery assistant. Help customers with:
-            - Taking orders for baked goods
-            - Providing information about menu items
-            - Answering questions about ingredients and allergens
-            - Store hours and location
-            - Custom cake orders
-            
-            Be friendly, professional, and concise. If you can't help with something, politely direct them to call the bakery directly.`,
-            voice: 'alloy',
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 200,
-            },
-          },
-        };
-        
-        openaiWs.send(JSON.stringify(sessionConfig));
-      });
-
-      openaiWs.on('message', (data) => {
-        try {
-          const message = JSON.parse(data);
-          console.log('OpenAI message type:', message.type);
-          
-          // Forward OpenAI responses to Exotel
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
-          }
-        } catch (error) {
-          console.error('Error processing OpenAI message:', error);
-        }
-      });
-
-      openaiWs.on('error', (error) => {
-        console.error('OpenAI WebSocket error:', error);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'error',
-            message: 'OpenAI connection error'
-          }));
-        }
-      });
-
-      openaiWs.on('close', () => {
-        console.log('OpenAI WebSocket connection closed');
-      });
-
-    } catch (error) {
-      console.error('Error initializing OpenAI connection:', error);
-    }
-  };
-
-  // Handle messages from Exotel
-  ws.on('message', (data) => {
-    try {
-      console.log('Received message from Exotel');
+  // Connect to OpenAI Realtime API
+  const connectToOpenAI = () => {
+    const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01';
+    
+    openaiWs = new WebSocket(url, {
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'realtime=v1'
+      }
+    });
+    
+    openaiWs.on('open', () => {
+      console.log('Connected to OpenAI Realtime API');
       
-      // Initialize OpenAI connection if not already done
-      if (!openaiWs || openaiWs.readyState !== WebSocket.OPEN) {
-        initOpenAI();
-        
-        // Wait a moment for connection to establish
-        setTimeout(() => {
-          if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.send(data);
+      // Send session configuration
+      const sessionConfig = {
+        type: 'session.update',
+        session: {
+          modalities: ['text', 'audio'],
+          instructions: 'You are a helpful bakery assistant. Help customers with their orders and questions about baked goods.',
+          voice: 'alloy',
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
+          input_audio_transcription: {
+            model: 'whisper-1'
           }
-        }, 1000);
-      } else {
-        // Forward message to OpenAI
-        openaiWs.send(data);
+        }
+      };
+      
+      openaiWs.send(JSON.stringify(sessionConfig));
+    });
+    
+    openaiWs.on('message', (data) => {
+      // Forward OpenAI messages to client
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+    
+    openaiWs.on('error', (error) => {
+      console.error('OpenAI WebSocket error:', error);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'OpenAI connection error'
+        }));
+      }
+    });
+    
+    openaiWs.on('close', () => {
+      console.log('OpenAI WebSocket closed');
+    });
+  };
+  
+  // Connect to OpenAI when client connects
+  connectToOpenAI();
+  
+  // Handle messages from client (Exotel)
+  ws.on('message', (message) => {
+    console.log('Received from client:', message.toString());
+    
+    try {
+      // Forward client messages to OpenAI
+      if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+        openaiWs.send(message);
       }
     } catch (error) {
-      console.error('Error handling Exotel message:', error);
+      console.error('Error forwarding message to OpenAI:', error);
     }
   });
-
+  
+  // Handle client disconnection
   ws.on('close', () => {
-    console.log('Exotel WebSocket connection closed');
+    console.log('Client disconnected');
     if (openaiWs) {
       openaiWs.close();
     }
   });
-
+  
+  // Handle client errors
   ws.on('error', (error) => {
-    console.error('Exotel WebSocket error:', error);
-    if (openaiWs) {
-      openaiWs.close();
-    }
+    console.error('Client WebSocket error:', error);
   });
-
-  // Send welcome message
-  ws.send(JSON.stringify({
-    type: 'connection_established',
-    message: 'Connected to Bakery Bot Server'
-  }));
 });
 
-// Start server
-server.listen(PORT, () => {
-  console.log(`Bakery Bot WebSocket Server running on port ${PORT}`);
-  console.log(`WebSocket URL: ws://localhost:${PORT}`);
+// Handle server errors
+wss.on('error', (error) => {
+  console.error('WebSocket server error:', error);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('Shutting down server...');
-  wss.clients.forEach((ws) => {
-    ws.close();
-  });
-  server.close(() => {
-    console.log('Server stopped');
-    process.exit(0);
-  });
+  console.log('Received SIGTERM, shutting down gracefully');
+  wss.close();
+});
+
+process.on('SIGINT', () => {
+  console.log('Received SIGINT, shutting down gracefully');
+  wss.close();
 });
