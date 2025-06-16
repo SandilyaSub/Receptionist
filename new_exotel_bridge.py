@@ -405,15 +405,15 @@ class GeminiSession:
         """Wait for and process the 'start' message from the client."""
         self.logger.info("Waiting for 'start' message from client")
         
-        try:
-            # Set a reasonable timeout for waiting for the start message
-            start_timeout = 30  # seconds
-            start_wait_start_time = time.time()
-            
+        # Set a reasonable timeout for waiting for the start message
+        start_timeout = 10  # seconds, reduced from 30 to fail faster if there's an issue
+        
+        # Define the inner function to process messages until we get a start message
+        async def process_messages_until_start():
             async for message in self.websocket:
                 try:
                     data = json.loads(message)
-                    self.logger.debug(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
+                    self.logger.info(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
                     
                     if "event" in data:
                         if data["event"] == "connected":
@@ -433,20 +433,33 @@ class GeminiSession:
                                 self.custom_parameters = start_data.get("custom_parameters", {})
                                 
                                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
-                                return  # Exit after processing start message
-                    
-                    # Check for timeout
-                    if time.time() - start_wait_start_time > start_timeout:
-                        self.logger.error(f"Timed out waiting for start message after {start_timeout} seconds")
-                        raise TimeoutError(f"No start message received within {start_timeout} seconds")
-                        
+                                return True  # Successfully processed start message
                 except json.JSONDecodeError:
                     self.logger.warning("Received non-JSON message")
                 except Exception as e:
                     self.logger.error(f"Error processing message during wait_for_start: {e}")
+            
+            # If we get here, the websocket was closed without receiving a start message
+            return False
+        
+        try:
+            # Wait for the start message with a timeout
+            try:
+                success = await asyncio.wait_for(process_messages_until_start(), timeout=start_timeout)
+                if not success:
+                    self.logger.error("WebSocket closed without receiving start message")
+                    # Continue anyway but with no stream_sid
+            except asyncio.TimeoutError:
+                self.logger.error(f"Timed out waiting for start message after {start_timeout} seconds")
+                # Continue anyway but with no stream_sid
+                
+            # If we didn't get a stream_sid, log a warning but continue
+            if not self.stream_sid:
+                self.logger.warning("No valid stream_sid received. Audio responses will not be sent to client.")
+                
         except Exception as e:
             self.logger.error(f"Error in wait_for_start_message: {e}")
-            raise
+            # Continue anyway but with no stream_sid
     
     async def receive_from_exotel(self):
         """Receive audio from Exotel via WebSocket and send to Gemini.
