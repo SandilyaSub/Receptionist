@@ -1,45 +1,70 @@
+# Receptionist Lovable - Exotel/Gemini Bridge
 
-# Bakery Bot WebSocket Server
+This project provides a WebSocket bridge to connect Exotel's voice streaming service with Google's Gemini Live API for a real-time conversational AI receptionist.
 
-A WebSocket server that connects Exotel phone calls to OpenAI's Realtime API for a bakery assistant bot.
+## Setup and Configuration
 
-## Features
+### 1. Dependencies
+Install the required Python packages:
+```bash
+pip install -r requirements.txt
+```
 
-- WebSocket server for real-time communication
-- Integration with OpenAI Realtime API
-- Bakery-specific assistant configuration
-- Audio streaming support
-- Error handling and reconnection logic
+### 2. Environment Variables
+Your Gemini API key must be set as an environment variable.
+```bash
+export GEMINI_API_KEY='YOUR_API_KEY_HERE'
+```
+Alternatively, you can create a `.env` file in the root directory and add the key there:
+```
+GEMINI_API_KEY='YOUR_API_KEY_HERE'
+```
 
-## Environment Variables
+### 3. Gemini Model Configuration
+The only supported model for this project is `models/gemini-2.5-flash-preview-native-audio-dialog`. This is configured within `new_exotel_bridge.py`.
 
-- `OPENAI_API_KEY` - Your OpenAI API key (required)
-- `PORT` - Server port (default: 3000)
+## Running the Server
 
-## Local Development
+### Local Development
+To start the WebSocket bridge server locally, run:
+```bash
+python3 new_exotel_bridge.py
+```
+The server will start on port 8765 by default.
 
-1. Install dependencies:
+### Railway Deployment
+
+This project is configured for deployment on Railway. Follow these steps to deploy:
+
+1. **Create a Railway account** at [railway.app](https://railway.app) if you don't have one already.
+
+2. **Install the Railway CLI** (optional but recommended):
    ```bash
-   npm install
+   npm i -g @railway/cli
    ```
 
-2. Set your OpenAI API key:
+3. **Login to Railway**:
    ```bash
-   export OPENAI_API_KEY="your-openai-api-key"
+   railway login
    ```
 
-3. Start the server:
+4. **Create a new project** in Railway dashboard or via CLI:
    ```bash
-   npm start
+   railway init
    ```
 
-## Deployment
+5. **Set environment variables** in the Railway dashboard:
+   - `GEMINI_API_KEY`: Your Google Gemini API key
 
-This server is designed to be deployed on Railway, Render, or similar platforms that support WebSocket connections.
+6. **Deploy the application**:
+   ```bash
+   railway up
+   ```
 
-## WebSocket URL
+7. **Configure Exotel** to connect to your Railway deployment URL:
+   - Railway will provide you with a domain (e.g., `https://your-app-name.up.railway.app`)
+   - In Exotel, configure the WebSocket endpoint as `wss://your-app-name.up.railway.app/media`
 
-After deployment, your WebSocket URL will be:
-`wss://your-app-name.railway.app`
+### WebSocket Secure (WSS)
 
-Configure this URL in your Exotel webhook settings.
+Railway automatically provides SSL/TLS termination, so your application will be accessible via WSS (WebSocket Secure) without any additional configuration. This is required for production use with Exotel.

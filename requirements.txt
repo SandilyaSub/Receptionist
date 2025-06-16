@@ -1,0 +1,19 @@
+# Web Server
+fastapi
+uvicorn
+websockets>=11.0.3
+
+# Google Gemini
+google-genai>=0.1.0
+
+# Utilities
+python-dotenv
+
+# Audio Processing
+audioop
+
+# For Railway deployment, we don't need these client-side dependencies
+# opencv-python
+# pyaudio
+# pillow
+# mss
