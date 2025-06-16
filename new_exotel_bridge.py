@@ -497,6 +497,24 @@ class GeminiSession:
         max_retries = 3
         base_retry_delay = 1.0
         
+        # Wait for stream_sid to be set before processing responses
+        # This prevents the race condition where Gemini sends audio before the client's start message is processed
+        stream_sid_wait_timeout = 10  # seconds
+        stream_sid_wait_start = time.time()
+        
+        while not self.stream_sid:
+            # Check if we've waited too long
+            if time.time() - stream_sid_wait_start > stream_sid_wait_timeout:
+                self.logger.warning(f"Timed out waiting for stream_sid after {stream_sid_wait_timeout} seconds")
+                # Continue anyway, but log the warning
+                break
+                
+            self.logger.debug("Waiting for stream_sid to be set before processing Gemini responses")
+            await asyncio.sleep(0.5)  # Wait a bit before checking again
+        
+        if self.stream_sid:
+            self.logger.info(f"stream_sid set to {self.stream_sid}, proceeding with Gemini responses")
+        
         try:
             # Process responses from Gemini with retry logic
             while True:
@@ -627,34 +645,40 @@ class GeminiSession:
                 # Assume it's open if we can't check
                 websocket_open = True
                 
-            if websocket_open and self.stream_sid:
-                # Increment sequence number for each message
-                self.sequence_number += 1
-                
-                # Send to client
-                await self.websocket.send(json.dumps({
-                    "event": "media",
-                    "sequence_number": self.sequence_number,
-                    "stream_sid": self.stream_sid,
-                    "media": {
-                        "payload": base64_audio
-                    }
-                }))
-                self.sequence_number += 1
-                
-                # Send a mark to help client track audio chunks
-                await self.websocket.send(json.dumps({
-                    "event": "mark",
-                    "sequence_number": self.sequence_number,
-                    "stream_sid": self.stream_sid,
-                    "mark": {
-                        "name": f"audio_chunk_{self.audio_chunk_counter}"
-                    }
-                }))
-            else:
-                self.logger.warning("WebSocket connection closed or stream_sid not set, cannot send audio response")
-                # Return false to indicate failure
+            if not websocket_open:
+                self.logger.warning("WebSocket connection is closed, cannot send audio response")
                 return False
+                
+            if not self.stream_sid:
+                self.logger.warning("stream_sid is not set, cannot send audio response. This may be due to not receiving a 'start' message from the client.")
+                return False
+                
+            # If we get here, both websocket_open and self.stream_sid are valid
+            # Increment sequence number for each message
+            self.sequence_number += 1
+            
+            # Send to client
+            await self.websocket.send(json.dumps({
+                "event": "media",
+                "sequence_number": self.sequence_number,
+                "stream_sid": self.stream_sid,
+                "media": {
+                    "payload": base64_audio
+                }
+            }))
+            self.sequence_number += 1
+            
+            # Send a mark to help client track audio chunks
+            await self.websocket.send(json.dumps({
+                "event": "mark",
+                "sequence_number": self.sequence_number,
+                "stream_sid": self.stream_sid,
+                "mark": {
+                    "name": f"audio_chunk_{self.audio_chunk_counter}"
+                }
+            }))
+            
+            self.logger.debug(f"Successfully sent audio chunk {self.audio_chunk_counter} to client with stream_sid {self.stream_sid}")
         except Exception as e:
             self.logger.error(f"Error sending audio response: {e}")
             import traceback
