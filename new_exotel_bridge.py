@@ -85,9 +85,14 @@ if not GEMINI_API_KEY:
     logging.error("GEMINI_API_KEY environment variable not set")
     raise ValueError("GEMINI_API_KEY environment variable must be set")
 
-# Initialize Gemini client
+# Initialize Gemini client with improved timeout and retry settings
 client = genai.Client(
-    http_options={"api_version": "v1beta"},
+    http_options={
+        "api_version": "v1beta",
+        "timeout": 60.0,  # Increase timeout to 60 seconds
+        "retries": 3,     # Add retry attempts
+        "backoff_factor": 0.5,  # Exponential backoff between retries
+    },
     api_key=GEMINI_API_KEY,
 )
 
@@ -341,14 +346,32 @@ class GeminiSession:
         self.gemini_output_sample_rate = None
     
     async def initialize(self):
-        """Initialize the Gemini session."""
+        """Initialize the Gemini session with retry logic."""
         self.logger.info("Initializing Gemini session")
-        # Use async with to properly handle the AsyncGeneratorContextManager
-        self.gemini_session = client.aio.live.connect(
-            model="models/gemini-2.5-flash-preview-native-audio-dialog",
-            config=GEMINI_CONFIG
-        )
-        self.logger.info("Gemini session initialized successfully")
+        
+        # Retry parameters
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second delay
+        
+        # Retry loop for initialization
+        for attempt in range(max_retries):
+            try:
+                # Use async with to properly handle the AsyncGeneratorContextManager
+                self.gemini_session = client.aio.live.connect(
+                    model="models/gemini-2.5-flash-preview-native-audio-dialog",
+                    config=GEMINI_CONFIG
+                )
+                self.logger.info("Gemini session initialized successfully")
+                return
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Gemini session initialization failed (attempt {attempt+1}/{max_retries}): {e}")
+                    # Exponential backoff
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Double the delay for next attempt
+                else:
+                    self.logger.error(f"Gemini session initialization failed after {max_retries} attempts: {e}")
+                    raise  # Re-raise the exception after all retries fail
     
     async def run(self):
         """Run the Gemini session, handling bidirectional audio streaming."""
@@ -469,154 +492,181 @@ class GeminiSession:
             raise
     
     async def receive_from_gemini(self):
-        """Receive audio responses from Gemini and send to Exotel via WebSocket."""
+        """Receive responses from Gemini and send to Exotel."""
         self.logger.info("Starting to receive responses from Gemini")
         
+        # Retry parameters
+        max_retries = 3
+        base_retry_delay = 1.0
+        
         try:
-            # Use the same pattern as Gemini_Live_actual.py for receiving responses
+            # Process responses from Gemini with retry logic
             while True:
-                turn = self.gemini_session.receive()
-                self.logger.debug("Waiting for Gemini response turn")
+                retry_count = 0
+                success = False
+                send_audio = False
                 
-                try:
-                    async for response in turn:
-                        self.logger.debug(f"Received response from Gemini: {response}")
+                # Retry loop for each turn
+                while not success and retry_count < max_retries:
+                    try:
+                        # Get the next turn from Gemini
+                        turn = self.gemini_session.receive()
+                        self.logger.debug("Waiting for Gemini response turn")
                         
-                        # Extract audio data from response
-                        audio_data = None
+                        # Process responses in this turn
+                        async for response in turn:
+                            self.logger.debug(f"Received response from Gemini: {response}")
+                            
+                            # Extract audio data from response
+                            audio_data = None
+                            
+                            # Check for data in response.data first
+                            if hasattr(response, 'data') and response.data:
+                                audio_data = response.data
+                                self.logger.debug("Found audio in response.data")
+                            
+                            # Check for inline_data if response.data is None
+                            elif hasattr(response, 'parts') and response.parts:
+                                for part in response.parts:
+                                    if hasattr(part, 'inline_data') and part.inline_data:
+                                        # Check if this is audio data
+                                        if hasattr(part.inline_data, 'mime_type') and 'audio' in part.inline_data.mime_type:
+                                            audio_data = part.inline_data.data
+                                            self.logger.debug(f"Found audio in inline_data with mime type: {part.inline_data.mime_type}")
+                                            break
+                            
+                            # Handle text responses if any
+                            if hasattr(response, 'text') and response.text:
+                                text = response.text
+                                self.logger.info(f"Gemini text response: {text}")
+                            
+                            # Process audio data if found
+                            if audio_data:
+                                # Process and send to Exotel
+                                self.logger.info(f"Processing audio data of length: {len(audio_data)} bytes")
+                                
+                                # Add the raw audio to our buffer
+                                self.audio_buffer.extend(audio_data)
+                                self.logger.debug(f"Added {len(audio_data)} bytes to audio buffer, total size now: {len(self.audio_buffer)} bytes")
+                                
+                                # Send audio when buffer reaches size threshold OR time threshold
+                                current_time = time.time()
+                                time_since_last_send = current_time - self.last_buffer_send_time
+                                send_audio = (len(self.audio_buffer) >= self.buffer_threshold or 
+                                             (len(self.audio_buffer) > 0 and time_since_last_send >= self.buffer_time_threshold))
+                                
+                                if send_audio:
+                                    await self._send_audio_to_exotel()
                         
-                        # Check for data in response.data first
-                        if data := response.data:
-                            audio_data = data
-                            self.logger.debug("Found audio in response.data")
+                        # If we got here without exceptions, the turn was successful
+                        success = True
                         
-                        # Check for inline_data if response.data is None
-                        elif hasattr(response, 'parts') and response.parts:
-                            for part in response.parts:
-                                if hasattr(part, 'inline_data') and part.inline_data:
-                                    # Check if this is audio data
-                                    if hasattr(part.inline_data, 'mime_type') and 'audio' in part.inline_data.mime_type:
-                                        audio_data = part.inline_data.data
-                                        self.logger.debug(f"Found audio in inline_data with mime type: {part.inline_data.mime_type}")
-                                        break
-                                        
-                        # Suppress the warnings about non-text parts in the response
-                        # These warnings are expected since we're using the audio API
-                        
-                        if audio_data:
-                            # Process and send to Exotel
-                            self.logger.info(f"Processing audio data of length: {len(audio_data)} bytes")
-                            
-                            # Debug audio saving removed to improve performance
-                            self.logger.debug(f"Received audio data of length: {len(audio_data)} bytes")
-                            
-                            # Add the raw audio to our buffer
-                            self.audio_buffer.extend(audio_data)
-                            self.logger.debug(f"Added {len(audio_data)} bytes to audio buffer, total size now: {len(self.audio_buffer)} bytes")
-                            
-                            # Send audio when buffer reaches size threshold OR time threshold
-                            current_time = time.time()
-                            time_since_last_send = current_time - self.last_buffer_send_time
-                            send_audio = (len(self.audio_buffer) >= self.buffer_threshold or 
-                                         (len(self.audio_buffer) > 0 and time_since_last_send >= self.buffer_time_threshold))
-                            
-                            if send_audio:
-                                self.audio_chunk_counter += 1
-                                self.logger.debug(f"Sending audio chunk {self.audio_chunk_counter} ({len(self.audio_buffer)} bytes)")
-                                
-                                # Process the entire buffer
-                                buffered_audio = bytes(self.audio_buffer)
-                                
-                                # Determine Gemini's output sample rate from first audio chunk if not already set
-                                if self.gemini_output_sample_rate is None:
-                                    # Use the known Gemini output sample rate from the reference implementation
-                                    # This is more reliable than trying to detect it from chunk size
-                                    self.gemini_output_sample_rate = GEMINI_OUTPUT_SAMPLE_RATE
-                                    self.logger.info(f"Using Gemini output sample rate: {self.gemini_output_sample_rate} Hz")
-                                
-                                # Resample from Gemini's rate to Exotel's rate
-                                resampled_audio = resample_audio(buffered_audio, self.gemini_output_sample_rate, EXOTEL_SAMPLE_RATE)
-                                
-                                # Debug audio saving removed to improve performance
-                                self.logger.debug(f"Resampled audio to {len(resampled_audio)} bytes")
-                                
-                                # Clear the buffer after sending
-                                self.audio_buffer.clear()
-                                
-                                # Reset the last buffer send time
-                                self.last_buffer_send_time = time.time()
-                                
-                                base64_audio = base64.b64encode(resampled_audio).decode('utf-8')
-                                
-                                # Send to Exotel if the WebSocket is still open
-                                self.logger.debug("Sending audio response to Exotel")
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            retry_delay = base_retry_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                            self.logger.warning(f"Error processing Gemini turn: {e}; retrying in {retry_delay} seconds (attempt {retry_count}/{max_retries})")
+                            await asyncio.sleep(retry_delay)
+                        else:
+                            self.logger.error(f"Error processing Gemini turn after {max_retries} attempts: {e}")
+                            # Send any buffered audio before moving on
+                            if len(self.audio_buffer) > 0:
                                 try:
-                                    # Check if WebSocket is open using a more compatible approach
-                                    websocket_open = True
-                                    try:
-                                        # First try to check if it has an 'open' attribute
-                                        if hasattr(self.websocket, 'open'):
-                                            websocket_open = self.websocket.open
-                                        # Then try to check if it has a 'closed' attribute
-                                        elif hasattr(self.websocket, 'closed'):
-                                            websocket_open = not self.websocket.closed
-                                        # Finally try to check if it has a 'state' attribute
-                                        elif hasattr(self.websocket, 'state'):
-                                            websocket_open = self.websocket.state.name == 'OPEN'
-                                    except Exception as e:
-                                        self.logger.warning(f"Error checking WebSocket state: {e}")
-                                        # Assume it's open if we can't check
-                                        websocket_open = True
-                                        
-                                    if websocket_open and self.stream_sid:
-                                        # Increment sequence number for each message
-                                        self.sequence_number += 1
-                                        
-                                        # Send to client
-                                        await self.websocket.send(json.dumps({
-                                            "event": "media",
-                                            "sequence_number": self.sequence_number,
-                                            "stream_sid": self.stream_sid,
-                                            "media": {
-                                                "payload": base64_audio
-                                            }
-                                        }))
-                                        self.sequence_number += 1
-                                        
-                                        # Send a mark to help client track audio chunks
-                                        await self.websocket.send(json.dumps({
-                                            "event": "mark",
-                                            "sequence_number": self.sequence_number,
-                                            "stream_sid": self.stream_sid,
-                                            "mark": {
-                                                "name": f"audio_chunk_{self.audio_chunk_counter}"
-                                            }
-                                        }))
-                                    else:
-                                        self.logger.warning("WebSocket connection closed or stream_sid not set, cannot send audio response")
-                                        # Exit the loop if the connection is closed
-                                        return
-                                except Exception as e:
-                                    self.logger.error(f"Error sending audio response: {e}")
-                                    import traceback
-                                    traceback.print_exc()
-                                except websockets.exceptions.ConnectionClosed:
-                                    self.logger.warning("WebSocket connection closed while sending audio response")
-                                    # Exit the loop if the connection is closed
-                                    return
-                        
-                        # Handle text responses if any
-                        if hasattr(response, 'text') and response.text:
-                            text = response.text
-                            self.logger.info(f"Gemini text response: {text}")
-                except Exception as e:
-                    self.logger.error(f"Error processing Gemini turn: {e}")
-                    # Continue to the next turn if there's an error with this one
-                    continue
+                                    await self._send_audio_to_exotel()
+                                except Exception as audio_error:
+                                    self.logger.error(f"Error sending buffered audio after Gemini error: {audio_error}")
         
         except Exception as e:
             self.logger.error(f"Error in receive_from_gemini: {e}")
             raise
+    
+    async def _send_audio_to_exotel(self):
+        """Helper method to send buffered audio to Exotel"""
+        self.audio_chunk_counter += 1
+        self.logger.debug(f"Sending audio chunk {self.audio_chunk_counter} ({len(self.audio_buffer)} bytes)")
+        
+        # Process the entire buffer
+        buffered_audio = bytes(self.audio_buffer)
+        
+        # Determine Gemini's output sample rate from first audio chunk if not already set
+        if self.gemini_output_sample_rate is None:
+            # Use the known Gemini output sample rate from the reference implementation
+            # This is more reliable than trying to detect it from chunk size
+            self.gemini_output_sample_rate = GEMINI_OUTPUT_SAMPLE_RATE
+            self.logger.info(f"Using Gemini output sample rate: {self.gemini_output_sample_rate} Hz")
+        
+        # Resample from Gemini's rate to Exotel's rate
+        resampled_audio = resample_audio(buffered_audio, self.gemini_output_sample_rate, EXOTEL_SAMPLE_RATE)
+        
+        # Debug audio saving removed to improve performance
+        self.logger.debug(f"Resampled audio to {len(resampled_audio)} bytes")
+        
+        # Clear the buffer after sending
+        self.audio_buffer.clear()
+        
+        # Reset the last buffer send time
+        self.last_buffer_send_time = time.time()
+        
+        base64_audio = base64.b64encode(resampled_audio).decode('utf-8')
+        
+        # Send to Exotel if the WebSocket is still open
+        self.logger.debug("Sending audio response to Exotel")
+        try:
+            # Check if WebSocket is open using a more compatible approach
+            websocket_open = True
+            try:
+                # First try to check if it has an 'open' attribute
+                if hasattr(self.websocket, 'open'):
+                    websocket_open = self.websocket.open
+                # Then try to check if it has a 'closed' attribute
+                elif hasattr(self.websocket, 'closed'):
+                    websocket_open = not self.websocket.closed
+                # Finally try to check if it has a 'state' attribute
+                elif hasattr(self.websocket, 'state'):
+                    websocket_open = self.websocket.state.name == 'OPEN'
+            except Exception as e:
+                self.logger.warning(f"Error checking WebSocket state: {e}")
+                # Assume it's open if we can't check
+                websocket_open = True
+                
+            if websocket_open and self.stream_sid:
+                # Increment sequence number for each message
+                self.sequence_number += 1
+                
+                # Send to client
+                await self.websocket.send(json.dumps({
+                    "event": "media",
+                    "sequence_number": self.sequence_number,
+                    "stream_sid": self.stream_sid,
+                    "media": {
+                        "payload": base64_audio
+                    }
+                }))
+                self.sequence_number += 1
+                
+                # Send a mark to help client track audio chunks
+                await self.websocket.send(json.dumps({
+                    "event": "mark",
+                    "sequence_number": self.sequence_number,
+                    "stream_sid": self.stream_sid,
+                    "mark": {
+                        "name": f"audio_chunk_{self.audio_chunk_counter}"
+                    }
+                }))
+            else:
+                self.logger.warning("WebSocket connection closed or stream_sid not set, cannot send audio response")
+                # Return false to indicate failure
+                return False
+        except Exception as e:
+            self.logger.error(f"Error sending audio response: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        except websockets.exceptions.ConnectionClosed:
+            self.logger.warning("WebSocket connection closed while sending audio response")
+            return False
+            
+        return True
     
     async def cleanup(self):
         """Clean up resources used by this session."""
