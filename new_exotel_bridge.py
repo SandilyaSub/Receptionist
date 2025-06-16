@@ -653,8 +653,19 @@ class ExotelGeminiBridge:
         self.logger.info(f"Starting Exotel-Gemini Bridge server on {self.host}:{self.port}{self.path}")
         
         # Create a WebSocket server with specific route handling for Exotel
-        async def handler(websocket, path):
-            if path == self.path:
+        # Note: In some environments, the handler might be called with just the websocket parameter
+        # So we need to make the path parameter optional
+        async def handler(websocket, path=None):
+            # If path is None, try to get it from the websocket object (depends on websockets version)
+            if path is None:
+                try:
+                    path = websocket.path
+                except AttributeError:
+                    # If we can't get the path, assume it's the default path
+                    path = self.path
+            
+            # Now handle the connection based on the path
+            if path == self.path or path.endswith(self.path):
                 await self.handle_connection(websocket)
             else:
                 self.logger.warning(f"Received connection to unknown path: {path}")
