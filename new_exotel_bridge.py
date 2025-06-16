@@ -58,7 +58,21 @@ DEFAULT_PORT = 8765
 
 # Load API key from environment variable
 # SECURITY NOTE: Always use environment variables in production
+# Try to load from environment variable first
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Load from .env file if available (for local development)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    if not GEMINI_API_KEY:
+        GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+        if GEMINI_API_KEY:
+            logging.info("Loaded API key from .env file")
+except ImportError:
+    pass
+
+# Check if API key is available
 if not GEMINI_API_KEY:
     logging.error("GEMINI_API_KEY environment variable not set")
     raise ValueError("GEMINI_API_KEY environment variable must be set")
