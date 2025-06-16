@@ -551,7 +551,24 @@ class GeminiSession:
                                 # Send to Exotel if the WebSocket is still open
                                 self.logger.debug("Sending audio response to Exotel")
                                 try:
-                                    if not self.websocket.closed and self.stream_sid:
+                                    # Check if WebSocket is open using a more compatible approach
+                                    websocket_open = True
+                                    try:
+                                        # First try to check if it has an 'open' attribute
+                                        if hasattr(self.websocket, 'open'):
+                                            websocket_open = self.websocket.open
+                                        # Then try to check if it has a 'closed' attribute
+                                        elif hasattr(self.websocket, 'closed'):
+                                            websocket_open = not self.websocket.closed
+                                        # Finally try to check if it has a 'state' attribute
+                                        elif hasattr(self.websocket, 'state'):
+                                            websocket_open = self.websocket.state.name == 'OPEN'
+                                    except Exception as e:
+                                        self.logger.warning(f"Error checking WebSocket state: {e}")
+                                        # Assume it's open if we can't check
+                                        websocket_open = True
+                                        
+                                    if websocket_open and self.stream_sid:
                                         # Increment sequence number for each message
                                         self.sequence_number += 1
                                         
