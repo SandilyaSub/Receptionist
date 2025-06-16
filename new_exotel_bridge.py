@@ -85,13 +85,11 @@ if not GEMINI_API_KEY:
     logging.error("GEMINI_API_KEY environment variable not set")
     raise ValueError("GEMINI_API_KEY environment variable must be set")
 
-# Initialize Gemini client with improved timeout and retry settings
+# Initialize Gemini client with increased timeout
 client = genai.Client(
     http_options={
         "api_version": "v1beta",
         "timeout": 60.0,  # Increase timeout to 60 seconds
-        "retries": 3,     # Add retry attempts
-        "backoff_factor": 0.5,  # Exponential backoff between retries
     },
     api_key=GEMINI_API_KEY,
 )
