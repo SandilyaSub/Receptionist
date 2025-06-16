@@ -9,11 +9,10 @@ google-genai>=0.1.0
 # Utilities
 python-dotenv
 
-# Audio Processing
-audioop
-
 # For Railway deployment, we don't need these client-side dependencies
 # opencv-python
 # pyaudio
 # pillow
 # mss
+
+# Note: audioop is a built-in Python module and doesn't need to be installed
