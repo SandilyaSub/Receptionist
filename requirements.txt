@@ -9,6 +9,10 @@ google-genai>=0.1.0
 # Utilities
 python-dotenv
 
+# Python version compatibility
+taskgroup
+exceptiongroup
+
 # For Railway deployment, we don't need these client-side dependencies
 # opencv-python
 # pyaudio

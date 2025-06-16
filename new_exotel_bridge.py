@@ -16,6 +16,14 @@ import time
 import warnings
 from typing import Dict, Optional
 
+# Add compatibility shim for Python < 3.11
+import taskgroup
+import exceptiongroup
+if not hasattr(asyncio, 'TaskGroup'):
+    asyncio.TaskGroup = taskgroup.TaskGroup
+if not hasattr(asyncio, 'ExceptionGroup'):
+    asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
+
 import websockets
 from google import genai
 from google.genai import types
