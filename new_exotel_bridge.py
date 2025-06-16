@@ -374,6 +374,12 @@ class GeminiSession:
     async def run(self):
         """Run the Gemini session, handling bidirectional audio streaming."""
         try:
+            # First, wait for and process the 'start' message from the client
+            # This ensures stream_sid is set before any audio processing begins
+            await self.wait_for_start_message()
+            
+            # Only initialize Gemini after we have the stream_sid
+            self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
             await self.initialize()
             
             # Use async with to properly handle the Gemini session
@@ -383,8 +389,8 @@ class GeminiSession:
                 
                 # Create tasks for bidirectional streaming
                 async with asyncio.TaskGroup() as tg:
-                    # Task 1: Receive audio from Exotel and send to Gemini
-                    tg.create_task(self.receive_from_exotel())
+                    # Task 1: Continue receiving audio from Exotel and send to Gemini
+                    tg.create_task(self.continue_receiving_from_exotel())
                     
                     # Task 2: Receive responses from Gemini and send to Exotel
                     tg.create_task(self.receive_from_gemini())
@@ -394,25 +400,28 @@ class GeminiSession:
             raise
         finally:
             await self.cleanup()
-    
-    async def receive_from_exotel(self):
-        """Receive audio from Exotel via WebSocket and send to Gemini."""
-        self.logger.info("Starting to receive audio from Exotel")
+            
+    async def wait_for_start_message(self):
+        """Wait for and process the 'start' message from the client."""
+        self.logger.info("Waiting for 'start' message from client")
         
         try:
+            # Set a reasonable timeout for waiting for the start message
+            start_timeout = 30  # seconds
+            start_wait_start_time = time.time()
+            
             async for message in self.websocket:
                 try:
                     data = json.loads(message)
-                    self.logger.debug(f"Received message from Exotel: {data['event'] if 'event' in data else 'unknown event'}")
+                    self.logger.debug(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
                     
                     if "event" in data:
-                        # Handle Exotel protocol messages
                         if data["event"] == "connected":
-                            self.logger.info("Connected message received from Exotel")
-                            # No specific action needed for connected event
+                            self.logger.info("Connected message received")
+                            # Continue waiting for start message
                             
                         elif data["event"] == "start":
-                            self.logger.info("Start message received from Exotel")
+                            self.logger.info("Start message received")
                             # Extract and store session information
                             if "start" in data:
                                 start_data = data["start"]
@@ -424,60 +433,83 @@ class GeminiSession:
                                 self.custom_parameters = start_data.get("custom_parameters", {})
                                 
                                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
+                                return  # Exit after processing start message
+                    
+                    # Check for timeout
+                    if time.time() - start_wait_start_time > start_timeout:
+                        self.logger.error(f"Timed out waiting for start message after {start_timeout} seconds")
+                        raise TimeoutError(f"No start message received within {start_timeout} seconds")
+                        
+                except json.JSONDecodeError:
+                    self.logger.warning("Received non-JSON message")
+                except Exception as e:
+                    self.logger.error(f"Error processing message during wait_for_start: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in wait_for_start_message: {e}")
+            raise
+    
+    async def receive_from_exotel(self):
+        """Receive audio from Exotel via WebSocket and send to Gemini.
+        
+        This is the original method that processes all messages. It's now split into
+        two phases: wait_for_start_message and continue_receiving_from_exotel.
+        """
+        self.logger.info("Starting to receive audio from Exotel")
+        
+        # First wait for the start message
+        await self.wait_for_start_message()
+        
+        # Then continue receiving audio and other messages
+        await self.continue_receiving_from_exotel()
+    
+    async def continue_receiving_from_exotel(self):
+        """Continue receiving audio from Exotel after the start message has been processed."""
+        self.logger.info("Continuing to receive audio from Exotel")
+        
+        try:
+            async for message in self.websocket:
+                try:
+                    data = json.loads(message)
+                    self.logger.debug(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
+                    
+                    if "event" in data:
+                        if data["event"] == "connected":
+                            self.logger.info("Connected message received")
                             
                         elif data["event"] == "media":
-                            # Process audio and send to Gemini
-                            # Decode the base64 audio data
-                            audio_data = base64.b64decode(data["media"]["payload"])
+                            # Process incoming audio data
+                            if "media" in data and "payload" in data["media"]:
+                                # Decode base64 audio data
+                                audio_data = base64.b64decode(data["media"]["payload"])
+                                sample_rate = data["media"].get("rate", 8000)  # Default to 8kHz if not specified
+                                
+                                # Resample audio to 24kHz for Gemini if needed
+                                if sample_rate != GEMINI_SAMPLE_RATE:
+                                    self.logger.debug(f"Resampling audio from {sample_rate}Hz to {GEMINI_SAMPLE_RATE}Hz")
+                                    audio_data = resample_audio(audio_data, sample_rate, GEMINI_SAMPLE_RATE)
+                                
+                                # Send audio data to Gemini
+                                if self.gemini_session:
+                                    await self.gemini_session.send_audio(audio_data)
+                                    self.logger.debug(f"Sent {len(audio_data)} bytes of audio to Gemini")
+                                else:
+                                    self.logger.warning("Cannot send audio to Gemini: session not initialized")
                             
-                            # For Exotel, always use 8kHz as the source rate
-                            client_sample_rate = EXOTEL_SAMPLE_RATE
-                            
-                            # Resample audio from Exotel's 8kHz to Gemini's 16kHz
-                            self.logger.debug(f"Resampling audio from {client_sample_rate}Hz to {GEMINI_SAMPLE_RATE}Hz")
-                            resampled_audio = resample_audio(audio_data, client_sample_rate, GEMINI_SAMPLE_RATE)
-                            
-                            # Send audio to Gemini
-                            self.logger.debug("Sending audio chunk to Gemini")
-                            await self.gemini_session.send_realtime_input(audio=types.Blob(
-                                data=resampled_audio,
-                                mime_type="audio/pcm"
-                            ))
-                        
-                        elif data["event"] == "dtmf":
-                            # Handle DTMF (touch-tone) input if needed
-                            if "dtmf" in data and "digit" in data["dtmf"]:
-                                digit = data["dtmf"]["digit"]
-                                self.logger.info(f"DTMF digit received: {digit}")
-                                # Could send this to Gemini as text if needed
-                                await self.gemini_session.send_client_content(
-                                    turns={"parts": [{"text": f"User pressed {digit}"}]},
-                                    turn_complete=False
-                                )
-                        
                         elif data["event"] == "stop":
-                            # Call is ending
-                            self.logger.info("Stop message received from Exotel")
-                            if "stop" in data and "reason" in data["stop"]:
-                                reason = data["stop"]["reason"]
-                                self.logger.info(f"Stream stopped: reason={reason}")
-                            
-                            # Signal turn completion to Gemini
-                            await self.gemini_session.send_client_content(
-                                turns={"parts": [{"text": ""}]}, 
-                                turn_complete=True
-                            )
-                            # We'll exit the loop naturally when the websocket closes
+                            self.logger.info("Stop message received")
+                            # Close the Gemini session gracefully
+                            if self.gemini_session:
+                                await self.gemini_session.send_audio(None)  # Signal end of audio stream
+                                self.logger.info("Sent end-of-stream signal to Gemini")
+                            break  # Exit the loop
                             
                         elif data["event"] == "mark":
-                            # Mark event for tracking media completion
-                            self.logger.info("Mark message received from Exotel")
+                            self.logger.info(f"Mark message received: {data.get('mark', {})}")
                             # No specific action needed for mark event
                             
                         elif data["event"] == "clear":
-                            # Clear event to stop playing queued audio
-                            self.logger.info("Clear message received from Exotel")
-                            # We could potentially clear our audio buffer here if needed
+                            self.logger.info("Clear message received")
+                            # Clear our audio buffer
                             self.audio_buffer.clear()
                             self.last_buffer_send_time = time.time()
                 except json.JSONDecodeError:
@@ -497,23 +529,9 @@ class GeminiSession:
         max_retries = 3
         base_retry_delay = 1.0
         
-        # Wait for stream_sid to be set before processing responses
-        # This prevents the race condition where Gemini sends audio before the client's start message is processed
-        stream_sid_wait_timeout = 10  # seconds
-        stream_sid_wait_start = time.time()
-        
-        while not self.stream_sid:
-            # Check if we've waited too long
-            if time.time() - stream_sid_wait_start > stream_sid_wait_timeout:
-                self.logger.warning(f"Timed out waiting for stream_sid after {stream_sid_wait_timeout} seconds")
-                # Continue anyway, but log the warning
-                break
-                
-            self.logger.debug("Waiting for stream_sid to be set before processing Gemini responses")
-            await asyncio.sleep(0.5)  # Wait a bit before checking again
-        
-        if self.stream_sid:
-            self.logger.info(f"stream_sid set to {self.stream_sid}, proceeding with Gemini responses")
+        # We no longer need to wait for stream_sid here since we now ensure it's set
+        # before initializing Gemini in the run() method
+        self.logger.info(f"Using stream_sid: {self.stream_sid} for audio responses")
         
         try:
             # Process responses from Gemini with retry logic
