@@ -46,6 +46,7 @@ class WSSExotelTestClient:
         self.audio = pyaudio.PyAudio()
         self.input_stream = None
         self.output_stream = None
+        self.is_shutting_down = False  # Flag to track shutdown state
         
     async def connect(self):
         """Connect to the WebSocket server."""
@@ -89,6 +90,10 @@ class WSSExotelTestClient:
     
     async def disconnect(self):
         """Disconnect from the WebSocket server."""
+        # Set the shutdown flag first to prevent further audio processing
+        self.is_shutting_down = True
+        logger.info("Starting client shutdown")
+        
         if self.recording:
             await self.stop_recording()
             
@@ -268,8 +273,11 @@ class WSSExotelTestClient:
                             # Decode the base64 audio data
                             audio_data = base64.b64decode(payload)
                             
-                            # Play the audio data
-                            self.output_stream.write(audio_data)
+                            # Play the audio data only if not shutting down and output stream exists
+                            if not self.is_shutting_down and self.output_stream:
+                                self.output_stream.write(audio_data)
+                            else:
+                                logger.debug("Skipping audio playback during shutdown")
                         
                         logger.debug("Received media message")
                     else:
