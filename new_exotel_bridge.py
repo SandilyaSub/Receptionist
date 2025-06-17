@@ -553,6 +553,28 @@ class GeminiSession:
         try:
             # Process responses from Gemini with retry logic
             while True:
+                # Check if WebSocket is still open
+                websocket_open = True
+                try:
+                    # First try to check if it has an 'open' attribute
+                    if hasattr(self.websocket, 'open'):
+                        websocket_open = self.websocket.open
+                    # Then try to check if it has a 'closed' attribute
+                    elif hasattr(self.websocket, 'closed'):
+                        websocket_open = not self.websocket.closed
+                    # Finally try to check if it has a 'state' attribute
+                    elif hasattr(self.websocket, 'state'):
+                        websocket_open = self.websocket.state.name == 'OPEN'
+                except Exception as e:
+                    self.logger.warning(f"Error checking WebSocket state: {e}")
+                    # Assume it's open if we can't check
+                    websocket_open = True
+                
+                # If WebSocket is closed, stop processing
+                if not websocket_open:
+                    self.logger.info("Client WebSocket connection closed, stopping Gemini processing")
+                    break
+                
                 retry_count = 0
                 success = False
                 send_audio = False
@@ -627,6 +649,9 @@ class GeminiSession:
                                 except Exception as audio_error:
                                     self.logger.error(f"Error sending buffered audio after Gemini error: {audio_error}")
         
+        except websockets.exceptions.ConnectionClosed:
+            self.logger.info("WebSocket connection closed, stopping Gemini processing")
+            # Don't raise the exception, allow for graceful cleanup
         except Exception as e:
             self.logger.error(f"Error in receive_from_gemini: {e}")
             raise
@@ -729,14 +754,17 @@ class GeminiSession:
         """Clean up resources."""
         self.logger.info("Cleaning up Gemini session")
         # Close the Gemini session if it exists
-        # The session context manager should handle this automatically,
-        # but we log it for clarity
         if self.gemini_session:
             try:
+                # Explicitly close the Gemini session to stop it from generating more audio
                 await self.gemini_session.close()
                 self.logger.info("Gemini session closed successfully")
             except Exception as e:
                 self.logger.error(f"Error closing Gemini session: {e}")
+            finally:
+                # Set to None to prevent further use
+                self.gemini_session = None
+                self.logger.info("Gemini session reference cleared")
 
 
 class ExotelGeminiBridge:
