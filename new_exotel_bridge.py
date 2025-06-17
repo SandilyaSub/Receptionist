@@ -503,7 +503,10 @@ class GeminiSession:
                                 
                                 # Send audio data to Gemini
                                 if self.gemini_session:
-                                    await self.gemini_session.send_audio_bytes(audio_data)
+                                    await self.gemini_session.send_realtime_input(audio=types.Blob(
+                                        data=audio_data,
+                                        mime_type="audio/pcm"
+                                    ))
                                     self.logger.debug(f"Sent {len(audio_data)} bytes of audio to Gemini")
                                 else:
                                     self.logger.warning("Cannot send audio to Gemini: session not initialized")
@@ -512,8 +515,9 @@ class GeminiSession:
                             self.logger.info("Stop message received")
                             # Close the Gemini session gracefully
                             if self.gemini_session:
-                                await self.gemini_session.send_audio_bytes(None)  # Signal end of audio stream
-                                self.logger.info("Sent end-of-stream signal to Gemini")
+                                # For end-of-stream, we don't send any more audio
+                                # The session will be closed in the cleanup method
+                                self.logger.info("Received stop message, will close Gemini session")
                             break  # Exit the loop
                             
                         elif data["event"] == "mark":
@@ -722,8 +726,11 @@ class GeminiSession:
         return True
     
     async def cleanup(self):
-        """Clean up resources used by this session."""
+        """Clean up resources."""
         self.logger.info("Cleaning up Gemini session")
+        # Close the Gemini session if it exists
+        # The session context manager should handle this automatically,
+        # but we log it for clarity
         if self.gemini_session:
             try:
                 await self.gemini_session.close()
