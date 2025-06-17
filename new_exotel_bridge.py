@@ -45,15 +45,30 @@ logging.basicConfig(
     ]
 )
 
-# Suppress specific warnings from the google-genai library
+# Create a custom filter to filter out specific log messages
+class NonTextPartsFilter(logging.Filter):
+    """Filter to remove warnings about non-text parts in Gemini responses."""
+    def filter(self, record):
+        # Filter out warnings about non-text parts in the response
+        if 'non-text parts in the response' in record.getMessage():
+            return False
+        if 'inline_data' in record.getMessage():
+            return False
+        return True
+
+# Apply the filter to all relevant loggers
+for logger_name in ['google.genai', 'google.genai.text', 'root']:
+    logger = logging.getLogger(logger_name)
+    logger.addFilter(NonTextPartsFilter())
+
+# Set the level for google.genai loggers to ERROR to reduce verbosity
+logging.getLogger('google.genai').setLevel(logging.ERROR)
 logging.getLogger('google.genai.text').setLevel(logging.ERROR)
 
-# Filter out specific warnings about non-text parts in the response
-warnings.filterwarnings("ignore", message="there are non-text parts in the response")
+# Also use warnings module to filter warnings
+warnings.filterwarnings("ignore", message=".*non-text parts in the response.*")
 warnings.filterwarnings("ignore", message=".*inline_data.*")
-
-# Note: genai.configure() is not available in this version of the library
-# Using warnings.filterwarnings() instead
+warnings.filterwarnings("ignore", category=UserWarning, module='google.genai')
 
 # Constants
 EXOTEL_SAMPLE_RATE = 8000  # Exotel uses 8kHz audio (16-bit, mono PCM little-endian)
