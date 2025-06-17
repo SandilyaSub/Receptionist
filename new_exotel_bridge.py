@@ -502,8 +502,8 @@ class GeminiSession:
                                     audio_data = resample_audio(audio_data, sample_rate, GEMINI_SAMPLE_RATE)
                                 
                                 # Send audio data to Gemini
-                                if self.gemini_session and self.gemini_session.session:
-                                    await self.gemini_session.session.send_audio(audio_data)
+                                if self.gemini_session:
+                                    await self.gemini_session.send_audio_bytes(audio_data)
                                     self.logger.debug(f"Sent {len(audio_data)} bytes of audio to Gemini")
                                 else:
                                     self.logger.warning("Cannot send audio to Gemini: session not initialized")
@@ -511,8 +511,8 @@ class GeminiSession:
                         elif data["event"] == "stop":
                             self.logger.info("Stop message received")
                             # Close the Gemini session gracefully
-                            if self.gemini_session and self.gemini_session.session:
-                                await self.gemini_session.session.send_audio(None)  # Signal end of audio stream
+                            if self.gemini_session:
+                                await self.gemini_session.send_audio_bytes(None)  # Signal end of audio stream
                                 self.logger.info("Sent end-of-stream signal to Gemini")
                             break  # Exit the loop
                             
