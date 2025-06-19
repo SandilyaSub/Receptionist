@@ -409,6 +409,9 @@ class GeminiSession:
                     
                     # Task 2: Receive responses from Gemini and send to Exotel
                     tg.create_task(self.receive_from_gemini())
+                    
+                    # Task 3: Send keep-alive messages to prevent Exotel from timing out
+                    tg.create_task(self.send_keep_alive_messages())
                 
         except Exception as e:
             self.logger.error(f"Error in Gemini session: {e}")
@@ -765,21 +768,83 @@ class GeminiSession:
             
         return True
     
+    async def send_keep_alive_messages(self):
+        """Send periodic keep-alive messages to prevent Exotel from timing out the connection."""
+        self.logger.info("Starting keep-alive message task")
+        keep_alive_interval = 2.0  # Send a keep-alive every 2 seconds
+        keep_alive_counter = 0
+        
+        try:
+            while True:
+                # Check if WebSocket is still open
+                websocket_open = True
+                try:
+                    if hasattr(self.websocket, 'open'):
+                        websocket_open = self.websocket.open
+                    elif hasattr(self.websocket, 'closed'):
+                        websocket_open = not self.websocket.closed
+                    elif hasattr(self.websocket, 'state'):
+                        websocket_open = self.websocket.state.name == 'OPEN'
+                except Exception as e:
+                    self.logger.warning(f"Error checking WebSocket state in keep-alive: {e}")
+                    websocket_open = True
+                
+                if not websocket_open:
+                    self.logger.info("WebSocket closed, stopping keep-alive messages")
+                    break
+                    
+                if not self.stream_sid:
+                    self.logger.debug("stream_sid not set yet, waiting before sending keep-alive")
+                    await asyncio.sleep(0.5)
+                    continue
+                
+                # Send a keep-alive mark message
+                keep_alive_counter += 1
+                self.sequence_number += 1
+                
+                try:
+                    await self.websocket.send(json.dumps({
+                        "event": "mark",
+                        "sequence_number": self.sequence_number,
+                        "stream_sid": self.stream_sid,
+                        "mark": {
+                            "name": f"keep_alive_{keep_alive_counter}"
+                        }
+                    }))
+                    self.logger.debug(f"Sent keep-alive message #{keep_alive_counter}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to send keep-alive message: {e}")
+                    # If we can't send a message, the connection might be closed
+                    # Wait a bit before trying again
+                    await asyncio.sleep(0.5)
+                
+                # Wait before sending the next keep-alive
+                await asyncio.sleep(keep_alive_interval)
+                
+        except asyncio.CancelledError:
+            self.logger.info("Keep-alive task cancelled")
+        except Exception as e:
+            self.logger.error(f"Error in keep-alive task: {e}")
+    
     async def cleanup(self):
-        """Clean up resources."""
+        """Clean up resources for this session."""
         self.logger.info("Cleaning up Gemini session")
+        
         # Close the Gemini session if it exists
         if self.gemini_session:
             try:
-                # Explicitly close the Gemini session to stop it from generating more audio
-                await self.gemini_session.close()
-                self.logger.info("Gemini session closed successfully")
+                # Close the session context manager if possible
+                if hasattr(self.gemini_session, '__aexit__'):
+                    await self.gemini_session.__aexit__(None, None, None)
+                    self.logger.info("Gemini session closed successfully")
+                else:
+                    self.logger.info("Gemini session does not have __aexit__ method, skipping explicit close")
             except Exception as e:
                 self.logger.error(f"Error closing Gemini session: {e}")
-            finally:
-                # Set to None to prevent further use
-                self.gemini_session = None
-                self.logger.info("Gemini session reference cleared")
+        
+        # Clear the reference to avoid memory leaks
+        self.gemini_session = None
+        self.logger.info("Gemini session reference cleared")
 
 
 class ExotelGeminiBridge:
