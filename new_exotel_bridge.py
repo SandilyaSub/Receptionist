@@ -738,7 +738,7 @@ class GeminiSession:
             # Send to client
             await self.websocket.send(json.dumps({
                 "event": "media",
-                "sequence_number": self.sequence_number,
+                "sequence_number": str(self.sequence_number),
                 "stream_sid": self.stream_sid,
                 "media": {
                     "payload": base64_audio
@@ -749,7 +749,7 @@ class GeminiSession:
             # Send a mark to help client track audio chunks
             await self.websocket.send(json.dumps({
                 "event": "mark",
-                "sequence_number": self.sequence_number,
+                "sequence_number": str(self.sequence_number),
                 "stream_sid": self.stream_sid,
                 "mark": {
                     "name": f"audio_chunk_{self.audio_chunk_counter}"
@@ -805,7 +805,7 @@ class GeminiSession:
                 try:
                     await self.websocket.send(json.dumps({
                         "event": "mark",
-                        "sequence_number": self.sequence_number,
+                        "sequence_number": str(self.sequence_number),
                         "stream_sid": self.stream_sid,
                         "mark": {
                             "name": f"keep_alive_{keep_alive_counter}"
