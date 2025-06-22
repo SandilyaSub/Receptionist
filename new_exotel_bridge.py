@@ -355,13 +355,6 @@ class GeminiSession:
             if data.get("event") == "connected":
                 self.logger.info("Connected message received")
                 
-                # Extract tenant from connected message if present
-                if "connected" in data and "tenant" in data["connected"]:
-                    new_tenant = data["connected"]["tenant"]
-                    if new_tenant != self.tenant:
-                        self.logger.info(f"Updating tenant from '{self.tenant}' to '{new_tenant}' based on connected message")
-                        self.tenant = new_tenant
-                
                 # Wait for the next message (should be start)
                 message = await self.websocket.recv()
                 self.logger.info(f"Received message: {message}")
@@ -377,15 +370,9 @@ class GeminiSession:
                 self.call_sid = start_data.get("call_sid")
                 self.account_sid = start_data.get("account_sid")
                 
-                # Extract tenant from start message if present
-                if "tenant" in start_data:
-                    new_tenant = start_data["tenant"]
-                    if new_tenant != self.tenant:
-                        self.logger.info(f"Updating tenant from '{self.tenant}' to '{new_tenant}' based on start message")
-                        self.tenant = new_tenant
-                
                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
                 self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
+                self.logger.info(f"Using tenant '{self.tenant}' from URL query parameters")
                 
                 # Initialize Gemini session with the tenant (possibly updated from message)
                 self.logger.info(f"Initializing Gemini session for tenant '{self.tenant}'")
@@ -957,20 +944,6 @@ class ExotelGeminiBridge:
         async def handler(websocket, path=None):
             # Log the WebSocket object type and available attributes
             self.logger.info(f"WebSocket object type: {type(websocket)}")
-            self.logger.info(f"WebSocket dir: {dir(websocket)}")
-            
-            # Try to get headers if available
-            try:
-                headers = websocket.request_headers
-                self.logger.info(f"Request headers: {headers}")
-            except AttributeError:
-                self.logger.info("No request_headers attribute available")
-                headers = {}
-            
-            # Try to get the original URL from headers
-            original_url = headers.get('X-Forwarded-Uri', '') or headers.get('X-Original-Uri', '')
-            if original_url:
-                self.logger.info(f"Found original URL in headers: {original_url}")
             
             # If path is None, try to get it from the websocket object (depends on websockets version)
             if path is None:
@@ -984,58 +957,42 @@ class ExotelGeminiBridge:
             else:
                 self.logger.info(f"Path provided directly to handler: {path}")
             
-            # Direct tenant parsing in the handler for Railway compatibility
-            tenant = 'bakery'  # Default tenant
-            
             # Log the raw path
             self.logger.info(f"Raw WebSocket path in handler: '{path}'")
             
-            # Try to get tenant from original URL in headers first
-            if original_url:
-                # Extract tenant from original URL
-                clean_url = original_url.strip('/')
-                url_parts = clean_url.split('/')
-                self.logger.info(f"Original URL parts: {url_parts}")
-                
-                for part in url_parts:
-                    if part in ['saloon', 'bakery']:
-                        tenant = part
-                        self.logger.info(f"Found tenant in original URL: {tenant}")
-                        break
+            # Default tenant
+            tenant = 'bakery'
             
-            # If tenant not found in headers, try path
+            # Extract tenant from query parameters (Exotel passes custom parameters this way)
+            if '?' in path:
+                query_string = path.split('?', 1)[1]
+                self.logger.info(f"Found query string: {query_string}")
+                
+                # Parse query parameters
+                query_params = {}
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        query_params[key] = value
+                
+                self.logger.info(f"Query parameters: {query_params}")
+                
+                # Check for tenant parameter
+                if 'tenant' in query_params:
+                    tenant_param = query_params['tenant']
+                    if tenant_param in ['saloon', 'bakery']:
+                        tenant = tenant_param
+                        self.logger.info(f"Found tenant in query parameters: {tenant}")
+            
+            # Fallback: Try to find tenant in path segments
             if tenant == 'bakery' and path:
-                # Remove any query parameters
-                clean_path = path.split('?')[0]
-                # Remove leading and trailing slashes
-                clean_path = clean_path.strip('/')
-                # Split by slashes
-                parts = clean_path.split('/')
-                
-                self.logger.info(f"Path parts: {parts}")
-                
-                # Check for known tenants in the path parts
-                for part in parts:
-                    if part in ['saloon', 'bakery']:
-                        tenant = part
-                        self.logger.info(f"Found tenant in path: {tenant}")
+                # Split path into segments
+                path_segments = path.split('/')
+                for segment in path_segments:
+                    if segment in ['saloon', 'bakery']:
+                        tenant = segment
+                        self.logger.info(f"Found tenant in path segments: {tenant}")
                         break
-            
-            # Check for tenant in the full URL of the request
-            try:
-                request_url = str(websocket.request_uri)
-                self.logger.info(f"Full request URI: {request_url}")
-                if 'saloon' in request_url.lower():
-                    tenant = 'saloon'
-                    self.logger.info(f"Found 'saloon' in request URI")
-            except AttributeError:
-                self.logger.info("No request_uri attribute available")
-            
-            # Add a special override for testing
-            # IMPORTANT: This is just for debugging and should be removed in production
-            if path and 'saloon' in path.lower():
-                tenant = 'saloon'
-                self.logger.info(f"Forced tenant to 'saloon' based on path containing 'saloon'")
             
             self.logger.info(f"Final tenant determination: {tenant}")
             
