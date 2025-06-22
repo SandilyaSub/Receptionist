@@ -272,39 +272,44 @@ def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int
         return audio_data  # Return original audio if resampling fails
 
 class GeminiSession:
-    """Manages a single Gemini session for a WebSocket connection."""
+    """A session with Gemini for a single WebSocket connection."""
     
-    def __init__(self, session_id: str, websocket, tenant="bakery"):
-        """
+    def __init__(self, session_id, websocket, tenant="bakery"):
+        """Initialize a new session.
+        
         Args:
-            session_id: Unique identifier for this session
-            websocket: WebSocket connection to communicate with the client
+            session_id: A unique identifier for this session
+            websocket: The WebSocket connection
             tenant: The tenant identifier (e.g., 'bakery', 'saloon')
         """
         self.session_id = session_id
         self.websocket = websocket
-        self.gemini_session = None
-        self.tenant = tenant
-        self.logger = logging.getLogger(f"GeminiSession-{tenant}-{session_id}")
+        self.tenant = tenant  # Store the initial tenant
+        self.logger = logging.getLogger(f"GeminiSession-{session_id}")
         
-        # Exotel specific information
+        # Will be initialized later
+        self.gemini_session = None
+        
+        # Initialize audio processing
+        self.audio_processor = AudioProcessor()
+        
+        # Initialize state
         self.stream_sid = None
         self.call_sid = None
         self.account_sid = None
-        self.from_number = None
-        self.to_number = None
-        self.custom_parameters = {}
         self.sequence_number = 0
+        self.audio_chunk_counter = 0
+        self.is_speaking = False
         
         # Audio buffer for combining chunks before sending to client
         self.audio_buffer = bytearray()
-        self.buffer_threshold = 24000  # Buffer about 1 second of audio at 24kHz (smaller for more frequent sends)
-        self.last_buffer_send_time = time.time()  # Track when we last sent audio
-        self.buffer_time_threshold = 0.5  # Send buffer if it's been this many seconds since last send
-        self.audio_chunk_counter = 0  # Counter for audio chunks (used for debugging)
+        self.buffer_threshold = 24000  # Buffer about 1 second of audio at 24kHz
+        self.last_buffer_process_time = time.time()
+        self.buffer_time_threshold = 0.5  # Time in seconds before processing regardless of buffer size
         
         # Will be detected from first audio chunk
         self.gemini_output_sample_rate = None
+        self.gemini_output_channels = None
     
     async def initialize(self):
         """Initialize the Gemini session with retry logic."""
@@ -338,38 +343,78 @@ class GeminiSession:
                     raise  # Re-raise the exception after all retries fail
     
     async def run(self):
-        """Run the Gemini session, handling bidirectional audio streaming."""
+        """Run the session."""
+        self.logger.info("Waiting for 'start' message from client")
+        
         try:
-            # First, wait for and process the 'start' message from the client
-            # This ensures stream_sid is set before any audio processing begins
-            await self.wait_for_start_message()
+            # Wait for the start message
+            message = await self.websocket.recv()
+            self.logger.info(f"Received message: {message}")
             
-            # Only initialize Gemini after we have the stream_sid
-            self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
-            await self.initialize()
+            # Parse the message
+            data = json.loads(message)
             
-            # Use async with to properly handle the Gemini session
-            async with self.gemini_session as session:
-                self.gemini_session = session
-                self.logger.info("Gemini session connected")
+            # Check if it's a connected message (might come first in some clients)
+            if data.get("event") == "connected":
+                self.logger.info("Connected message received")
                 
-                # Create tasks for bidirectional streaming
-                async with asyncio.TaskGroup() as tg:
-                    # Task 1: Continue receiving audio from Exotel and send to Gemini
-                    tg.create_task(self.continue_receiving_from_exotel())
+                # Extract tenant from connected message if present
+                if "connected" in data and "tenant" in data["connected"]:
+                    new_tenant = data["connected"]["tenant"]
+                    if new_tenant != self.tenant:
+                        self.logger.info(f"Updating tenant from '{self.tenant}' to '{new_tenant}' based on connected message")
+                        self.tenant = new_tenant
+                
+                # Wait for the next message (should be start)
+                message = await self.websocket.recv()
+                self.logger.info(f"Received message: {message}")
+                data = json.loads(message)
+            
+            # Check if it's a start message
+            if data.get("event") == "start":
+                self.logger.info("Start message received")
+                
+                # Extract stream_sid, call_sid, and account_sid
+                start_data = data.get("start", {})
+                self.stream_sid = start_data.get("stream_sid")
+                self.call_sid = start_data.get("call_sid")
+                self.account_sid = start_data.get("account_sid")
+                
+                # Extract tenant from start message if present
+                if "tenant" in start_data:
+                    new_tenant = start_data["tenant"]
+                    if new_tenant != self.tenant:
+                        self.logger.info(f"Updating tenant from '{self.tenant}' to '{new_tenant}' based on start message")
+                        self.tenant = new_tenant
+                
+                self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
+                self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
+                
+                # Initialize Gemini session with the tenant (possibly updated from message)
+                self.logger.info(f"Initializing Gemini session for tenant '{self.tenant}'")
+                await self.initialize()
+                
+                # Use async with to properly handle the Gemini session
+                async with self.gemini_session as session:
+                    self.gemini_session = session
+                    self.logger.info("Gemini session connected")
                     
-                    # Task 2: Receive responses from Gemini and send to Exotel
-                    tg.create_task(self.receive_from_gemini())
-                    
-                    # Task 3: Send keep-alive messages to prevent Exotel from timing out
-                    tg.create_task(self.send_keep_alive_messages())
+                    # Create tasks for bidirectional streaming
+                    async with asyncio.TaskGroup() as tg:
+                        # Task 1: Continue receiving audio from Exotel and send to Gemini
+                        tg.create_task(self.continue_receiving_from_exotel())
+                        
+                        # Task 2: Receive responses from Gemini and send to Exotel
+                        tg.create_task(self.receive_from_gemini())
+                        
+                        # Task 3: Send keep-alive messages to prevent Exotel from timing out
+                        tg.create_task(self.send_keep_alive_messages())
                 
         except Exception as e:
             self.logger.error(f"Error in Gemini session: {e}")
-            raise
-        finally:
-            await self.cleanup()
-            
+            import traceback
+            traceback.print_exc()
+    
     async def wait_for_start_message(self):
         """Wait for and process the 'start' message from the client."""
         self.logger.info("Waiting for 'start' message from client")

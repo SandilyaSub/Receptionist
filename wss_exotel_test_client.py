@@ -90,6 +90,9 @@ class WSSExotelTestClient:
             # Send the start message
             await self.send_start()
             
+            # Send the connected message
+            await self.send_connected()
+            
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             raise
@@ -124,19 +127,57 @@ class WSSExotelTestClient:
     
     async def send_start(self):
         """Send a start message to the server."""
+        # Extract tenant from the server URL
+        tenant = "bakery"  # Default tenant
+        url_parts = self.server_url.split('/')
+        for part in url_parts:
+            if part in ["bakery", "saloon", "media"]:
+                tenant = part
+                break
+        
+        logger.info(f"Including tenant '{tenant}' in start message")
+        
         message = {
             "event": "start",
             "start": {
                 "stream_sid": self.stream_sid,
                 "call_sid": self.call_sid,
-                "account_sid": self.account_sid
+                "account_sid": self.account_sid,
+                "tenant": tenant  # Include tenant ID in the start message
             },
             "sequence_number": self.sequence_number
         }
         self.sequence_number += 1
         
         await self.websocket.send(json.dumps(message))
-        logger.info("Sent start message")
+        logger.info(f"Sent start message with tenant '{tenant}'")
+    
+    async def send_connected(self):
+        """Send a connected message to the server."""
+        # Extract tenant from the server URL
+        tenant = "bakery"  # Default tenant
+        url_parts = self.server_url.split('/')
+        for part in url_parts:
+            if part in ["bakery", "saloon", "media"]:
+                tenant = part
+                break
+        
+        logger.info(f"Including tenant '{tenant}' in connected message")
+        
+        message = {
+            "event": "connected",
+            "connected": {
+                "stream_sid": self.stream_sid,
+                "call_sid": self.call_sid,
+                "account_sid": self.account_sid,
+                "tenant": tenant  # Include tenant ID in the connected message
+            },
+            "sequence_number": self.sequence_number
+        }
+        self.sequence_number += 1
+        
+        await self.websocket.send(json.dumps(message))
+        logger.info(f"Sent connected message with tenant '{tenant}'")
     
     async def send_stop(self):
         """Send a stop message to the server."""
