@@ -14,15 +14,52 @@ import audioop
 import uuid
 import time
 import warnings
+import sys
 from typing import Dict, Optional
 
-# Add compatibility shim for Python < 3.11
-import taskgroup
-import exceptiongroup
-if not hasattr(asyncio, 'TaskGroup'):
-    asyncio.TaskGroup = taskgroup.TaskGroup
-if not hasattr(asyncio, 'ExceptionGroup'):
-    asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
+# For Python versions before 3.11, implement compatibility classes
+if sys.version_info < (3, 11):
+    # TaskGroup implementation for Python < 3.11
+    class TaskGroup:
+        """A simple TaskGroup implementation for Python versions before 3.11."""
+        
+        def __init__(self):
+            self.tasks = set()
+            
+        async def __aenter__(self):
+            return self
+            
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            if self.tasks:
+                # Cancel all tasks if we're exiting with an exception
+                if exc_type is not None:
+                    for task in self.tasks:
+                        if not task.done():
+                            task.cancel()
+                
+                # Wait for all tasks to complete
+                await asyncio.gather(*self.tasks, return_exceptions=True)
+            
+            # Re-raise the exception if there was one
+            return False
+            
+        def create_task(self, coro):
+            task = asyncio.create_task(coro)
+            self.tasks.add(task)
+            task.add_done_callback(self.tasks.discard)
+            return task
+    
+    # Simple ExceptionGroup implementation for Python < 3.11
+    class ExceptionGroup(Exception):
+        """A simple ExceptionGroup implementation for Python versions before 3.11."""
+        
+        def __init__(self, message, exceptions):
+            super().__init__(message)
+            self.exceptions = exceptions
+    
+    # Add the compatibility classes to asyncio namespace
+    asyncio.TaskGroup = TaskGroup
+    asyncio.ExceptionGroup = ExceptionGroup
 
 import websockets
 from google import genai
@@ -110,44 +147,74 @@ client = genai.Client(
 )
 
 # Load system prompt from file
-def load_system_prompt(prompt_file="prompt.txt"):
-    """Load system prompt from a file.
+def load_system_prompt(tenant="bakery"):
+    """Load system prompt from a file based on tenant.
     
     Args:
-        prompt_file: Path to the prompt file
+        tenant: The tenant identifier (e.g., 'bakery', 'saloon')
         
     Returns:
-        The prompt text as a string
+        The system prompt as a string
     """
+    # Define the prompts directory
+    prompts_dir = "prompts"
+    
+    # Construct the prompt file path based on tenant
+    prompt_path = os.path.join(prompts_dir, f"prompt-{tenant}.txt")
+    
     try:
-        with open(prompt_file, "r") as f:
-            return f.read()
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            system_prompt = f.read()
+            logging.info(f"Loaded system prompt for tenant '{tenant}' from {prompt_path}")
+            return system_prompt
     except Exception as e:
-        logging.error(f"Error loading prompt from {prompt_file}: {e}")
-        # Return a basic fallback prompt if the file can't be loaded
-        return "You are a receptionist at Happy Endings bakery. Be polite and helpful."
+        logging.error(f"Failed to load system prompt for tenant '{tenant}' from {prompt_path}: {e}")
+        
+        # Try the default bakery prompt if tenant is not bakery
+        if tenant != "bakery":
+            try:
+                default_prompt_path = os.path.join(prompts_dir, "prompt-bakery.txt")
+                with open(default_prompt_path, "r", encoding="utf-8") as f:
+                    system_prompt = f.read()
+                    logging.info(f"Loaded default bakery prompt for tenant '{tenant}' from {default_prompt_path}")
+                    return system_prompt
+            except Exception as e2:
+                logging.error(f"Failed to load default bakery prompt: {e2}")
+        
+        # Return a basic fallback prompt if no files can be loaded
+        return f"You are a receptionist at a {tenant if tenant else 'bakery'}. Be polite and helpful."
 
-# Load the system prompt
-system_prompt = load_system_prompt()
-
-# Gemini configuration based on Gemini_Live_actual.py
-GEMINI_CONFIG = types.LiveConnectConfig(
-    response_modalities=["AUDIO"],
-    media_resolution="MEDIA_RESOLUTION_MEDIUM",
-    speech_config=types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
-        )
-    ),
-    context_window_compression=types.ContextWindowCompressionConfig(
-        trigger_tokens=25600,
-        sliding_window=types.SlidingWindow(target_tokens=12800),
-    ),
-    system_instruction=types.Content(
-        parts=[types.Part.from_text(text=system_prompt)],
-        role="user"
-    ),
-)
+# Function to create Gemini configuration with tenant-specific prompt
+def create_gemini_config(tenant="bakery"):
+    """Create a Gemini configuration with tenant-specific prompt.
+    
+    Args:
+        tenant: The tenant identifier (e.g., 'bakery', 'saloon')
+        
+    Returns:
+        A LiveConnectConfig object with the tenant-specific prompt
+    """
+    # Load the tenant-specific prompt
+    tenant_prompt = load_system_prompt(tenant)
+    
+    # Create and return the configuration
+    return types.LiveConnectConfig(
+        response_modalities=["AUDIO"],
+        media_resolution="MEDIA_RESOLUTION_MEDIUM",
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
+            )
+        ),
+        context_window_compression=types.ContextWindowCompressionConfig(
+            trigger_tokens=25600,
+            sliding_window=types.SlidingWindow(target_tokens=12800),
+        ),
+        system_instruction=types.Content(
+            parts=[types.Part.from_text(text=tenant_prompt)],
+            role="user"
+        ),
+    )
 
 # Audio processing helper functions
 def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int) -> bytes:
@@ -187,16 +254,18 @@ def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int
 class GeminiSession:
     """Manages a single Gemini session for a WebSocket connection."""
     
-    def __init__(self, session_id: str, websocket):
+    def __init__(self, session_id: str, websocket, tenant="bakery"):
         """
         Args:
             session_id: Unique identifier for this session
             websocket: WebSocket connection to communicate with the client
+            tenant: The tenant identifier (e.g., 'bakery', 'saloon')
         """
         self.session_id = session_id
         self.websocket = websocket
         self.gemini_session = None
-        self.logger = logging.getLogger(f"GeminiSession-{session_id}")
+        self.tenant = tenant
+        self.logger = logging.getLogger(f"GeminiSession-{tenant}-{session_id}")
         
         # Exotel specific information
         self.stream_sid = None
@@ -219,11 +288,14 @@ class GeminiSession:
     
     async def initialize(self):
         """Initialize the Gemini session with retry logic."""
-        self.logger.info("Initializing Gemini session")
+        self.logger.info(f"Initializing Gemini session for tenant '{self.tenant}'")
         
         # Retry parameters
         max_retries = 3
         retry_delay = 1.0  # Start with 1 second delay
+        
+        # Create tenant-specific configuration
+        tenant_config = create_gemini_config(self.tenant)
         
         # Retry loop for initialization
         for attempt in range(max_retries):
@@ -231,9 +303,9 @@ class GeminiSession:
                 # Use async with to properly handle the AsyncGeneratorContextManager
                 self.gemini_session = client.aio.live.connect(
                     model="models/gemini-2.5-flash-preview-native-audio-dialog",
-                    config=GEMINI_CONFIG
+                    config=tenant_config
                 )
-                self.logger.info("Gemini session initialized successfully")
+                self.logger.info(f"Gemini session initialized successfully for tenant '{self.tenant}'")
                 return
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -709,54 +781,85 @@ class GeminiSession:
 class ExotelGeminiBridge:
     """Main server class that manages WebSocket connections and Gemini sessions."""
     
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765, path: str = "/media"):
-        """Initialize the ExotelGeminiBridge server.
+    def __init__(self, host: str = "0.0.0.0", port: int = 8765, base_path: str = "/"):
+        """
+        Initialize the ExotelGeminiBridge server.
         
         Args:
             host: Host address to bind the server to
             port: Port to listen on
-            path: WebSocket endpoint path (Exotel expects /media)
+            base_path: Base WebSocket endpoint path
         """
         self.host = host
         self.port = port
-        self.path = path
+        self.base_path = base_path
         self.active_sessions: Dict[str, GeminiSession] = {}
         self.logger = logging.getLogger("ExotelGeminiBridge")
     
-    async def handle_connection(self, websocket):
+    async def handle_connection(self, websocket, path):
         """Handle a new WebSocket connection.
         
         Args:
             websocket: The WebSocket connection
+            path: The WebSocket path requested by the client
         """
+        # Parse the tenant from the path
+        tenant = self._parse_tenant_from_path(path)
+        
         # Generate a unique session ID
         session_id = str(uuid.uuid4())
-        self.logger.info(f"New connection established. Session ID: {session_id}")
+        self.logger.info(f"New connection: {session_id} for tenant '{tenant}'")
         
-        # Create a new Gemini session for this connection
-        gemini_session = GeminiSession(session_id, websocket)
-        self.active_sessions[session_id] = gemini_session
+        # Create a new session with the tenant
+        session = GeminiSession(session_id, websocket, tenant)
+        self.active_sessions[session_id] = session
         
         try:
-            # Run the session until it completes or encounters an error
-            await gemini_session.run()
-        except websockets.exceptions.ConnectionClosed:
-            self.logger.info(f"Connection closed for session {session_id}")
+            # Run the session
+            await session.run()
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.info(f"Connection closed: {session_id} - {e}")
         except Exception as e:
             self.logger.error(f"Error in session {session_id}: {e}")
         finally:
             # Clean up the session
             if session_id in self.active_sessions:
                 del self.active_sessions[session_id]
-            self.logger.info(f"Session {session_id} removed from active sessions")
+            self.logger.info(f"Session ended: {session_id}")
+            
+    def _parse_tenant_from_path(self, path):
+        """Parse the tenant from the WebSocket path.
+        
+        Args:
+            path: The WebSocket path
+            
+        Returns:
+            The tenant identifier (e.g., 'bakery', 'saloon')
+        """
+        # Remove leading and trailing slashes
+        clean_path = path.strip('/')
+        
+        # Split the path into segments
+        segments = clean_path.split('/')
+        
+        # If the path is empty or just 'media', use the default tenant
+        if not segments or segments[0] == 'media':
+            return 'bakery'  # Default tenant
+        
+        # If the path is like '/bakery' or '/saloon', use that as the tenant
+        # If the path is like '/bakery/media' or '/saloon/media', use the first segment
+        tenant = segments[0]
+        
+        # Log the tenant detection
+        self.logger.info(f"Detected tenant '{tenant}' from path '{path}'")
+        
+        return tenant
     
     async def start_server(self):
         """Start the WebSocket server."""
-        self.logger.info(f"Starting Exotel-Gemini Bridge server on {self.host}:{self.port}{self.path}")
+        self.logger.info(f"Starting multi-tenant Exotel-Gemini Bridge server on {self.host}:{self.port}{self.base_path}")
         
-        # Create a WebSocket server with specific route handling for Exotel
-        # Note: In some environments, the handler might be called with just the websocket parameter
-        # So we need to make the path parameter optional
+        # Create a WebSocket server
         async def handler(websocket, path=None):
             # If path is None, try to get it from the websocket object (depends on websockets version)
             if path is None:
@@ -764,18 +867,23 @@ class ExotelGeminiBridge:
                     path = websocket.path
                 except AttributeError:
                     # If we can't get the path, assume it's the default path
-                    path = self.path
+                    path = '/media'
             
-            # Now handle the connection based on the path
-            if path == self.path or path.endswith(self.path):
-                await self.handle_connection(websocket)
-            else:
-                self.logger.warning(f"Received connection to unknown path: {path}")
-                await websocket.close(1008, "Path not supported")
+            # Handle the connection with the path
+            await self.handle_connection(websocket, path)
         
-        async with websockets.serve(handler, self.host, self.port):
-            # Keep the server running indefinitely
-            await asyncio.Future()
+        # Start the server
+        server = await websockets.serve(
+            handler,
+            self.host,
+            self.port
+        )
+        
+        self.logger.info("Server started. Waiting for connections...")
+        self.logger.info("Available tenant paths: /bakery, /saloon, /media (default: bakery)")
+        
+        # Keep the server running indefinitely
+        await server.wait_closed()
 
 
 # Main entry point
@@ -783,10 +891,10 @@ async def main():
     # Parse command line arguments
     import argparse
     import sys
-    parser = argparse.ArgumentParser(description='Exotel-Gemini Bridge server')
+    parser = argparse.ArgumentParser(description='Multi-tenant Exotel-Gemini Bridge server')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to')
     parser.add_argument('--port', type=int, default=None, help='Port to listen on (overrides PORT env var)')
-    parser.add_argument('--path', type=str, default='/media', help='WebSocket endpoint path')
+    parser.add_argument('--base-path', type=str, default='/', help='Base WebSocket endpoint path')
     args = parser.parse_args()
 
     # Check if API key is available
@@ -798,9 +906,8 @@ async def main():
     port = args.port if args.port is not None else int(os.environ.get('PORT', DEFAULT_PORT))
 
     # Create and start the server
-    server = ExotelGeminiBridge(host=args.host, port=port, path=args.path)
-    logging.info(f"Starting server on {args.host}:{port}{args.path}")
-    return await server.start_server()
+    server = ExotelGeminiBridge(host=args.host, port=port, base_path=args.base_path)
+    await server.start_server()
 
 
 if __name__ == "__main__":

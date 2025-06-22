@@ -52,16 +52,22 @@ class WSSExotelTestClient:
         """Connect to the WebSocket server."""
         logger.info(f"Connecting to {self.server_url}")
         
-        # Create SSL context for WSS connections
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
         try:
-            self.websocket = await websockets.connect(
-                self.server_url,
-                ssl=ssl_context
-            )
+            # Determine if we need SSL based on the URL scheme
+            if self.server_url.startswith("wss://"):
+                # Create SSL context for WSS connections
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                self.websocket = await websockets.connect(
+                    self.server_url,
+                    ssl=ssl_context
+                )
+            else:
+                # No SSL for ws:// connections
+                self.websocket = await websockets.connect(self.server_url)
+                
             logger.info("Connected to server")
             
             # Initialize audio streams
@@ -360,14 +366,24 @@ def main():
     parser = argparse.ArgumentParser(description="WSS Exotel Test Client")
     parser.add_argument(
         "--server", 
-        default="wss://receptionist-production.up.railway.app/media",
-        help="WebSocket server URL (default: wss://receptionist-production.up.railway.app/media)"
+        default="wss://receptionist-production.up.railway.app",
+        help="Base WebSocket server URL (default: wss://receptionist-production.up.railway.app)"
+    )
+    parser.add_argument(
+        "--tenant",
+        choices=["bakery", "saloon", "media"],
+        default="bakery",
+        help="Tenant to connect to (bakery, saloon, or media for backward compatibility)"
     )
     args = parser.parse_args()
     
+    # Construct the full URL with tenant path
+    full_url = f"{args.server}/{args.tenant}"
+    print(f"Connecting to tenant: {args.tenant} at URL: {full_url}")
+    
     # Run the interactive client
     try:
-        asyncio.run(interactive_client(args.server))
+        asyncio.run(interactive_client(full_url))
     except KeyboardInterrupt:
         print("\nExiting...")
     except Exception as e:
