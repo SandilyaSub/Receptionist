@@ -909,9 +909,27 @@ class ExotelGeminiBridge:
     async def start_server(self):
         """Start the WebSocket server."""
         self.logger.info(f"Starting multi-tenant Exotel-Gemini Bridge server on {self.host}:{self.port}{self.base_path}")
+        self.logger.info(f"Server version: {websockets.__version__}")
         
         # Create a WebSocket server
         async def handler(websocket, path=None):
+            # Log the WebSocket object type and available attributes
+            self.logger.info(f"WebSocket object type: {type(websocket)}")
+            self.logger.info(f"WebSocket dir: {dir(websocket)}")
+            
+            # Try to get headers if available
+            try:
+                headers = websocket.request_headers
+                self.logger.info(f"Request headers: {headers}")
+            except AttributeError:
+                self.logger.info("No request_headers attribute available")
+                headers = {}
+            
+            # Try to get the original URL from headers
+            original_url = headers.get('X-Forwarded-Uri', '') or headers.get('X-Original-Uri', '')
+            if original_url:
+                self.logger.info(f"Found original URL in headers: {original_url}")
+            
             # If path is None, try to get it from the websocket object (depends on websockets version)
             if path is None:
                 try:
@@ -930,8 +948,21 @@ class ExotelGeminiBridge:
             # Log the raw path
             self.logger.info(f"Raw WebSocket path in handler: '{path}'")
             
-            # Simple but robust tenant extraction
-            if path:
+            # Try to get tenant from original URL in headers first
+            if original_url:
+                # Extract tenant from original URL
+                clean_url = original_url.strip('/')
+                url_parts = clean_url.split('/')
+                self.logger.info(f"Original URL parts: {url_parts}")
+                
+                for part in url_parts:
+                    if part in ['saloon', 'bakery']:
+                        tenant = part
+                        self.logger.info(f"Found tenant in original URL: {tenant}")
+                        break
+            
+            # If tenant not found in headers, try path
+            if tenant == 'bakery' and path:
                 # Remove any query parameters
                 clean_path = path.split('?')[0]
                 # Remove leading and trailing slashes
@@ -947,6 +978,22 @@ class ExotelGeminiBridge:
                         tenant = part
                         self.logger.info(f"Found tenant in path: {tenant}")
                         break
+            
+            # Check for tenant in the full URL of the request
+            try:
+                request_url = str(websocket.request_uri)
+                self.logger.info(f"Full request URI: {request_url}")
+                if 'saloon' in request_url.lower():
+                    tenant = 'saloon'
+                    self.logger.info(f"Found 'saloon' in request URI")
+            except AttributeError:
+                self.logger.info("No request_uri attribute available")
+            
+            # Add a special override for testing
+            # IMPORTANT: This is just for debugging and should be removed in production
+            if path and 'saloon' in path.lower():
+                tenant = 'saloon'
+                self.logger.info(f"Forced tenant to 'saloon' based on path containing 'saloon'")
             
             self.logger.info(f"Final tenant determination: {tenant}")
             
