@@ -156,16 +156,33 @@ def load_system_prompt(tenant="bakery"):
     Returns:
         The system prompt as a string
     """
-    # Define the prompts directory
-    prompts_dir = "prompts"
+    # Get the current script directory to use absolute paths
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Define the prompts directory with absolute path
+    prompts_dir = os.path.join(script_dir, "prompts")
+    
+    # Log the directories for debugging
+    logging.info(f"Script directory: {script_dir}")
+    logging.info(f"Prompts directory: {prompts_dir}")
+    logging.info(f"Current working directory: {os.getcwd()}")
+    
+    # List all files in the prompts directory for debugging
+    try:
+        prompt_files = os.listdir(prompts_dir)
+        logging.info(f"Available prompt files: {prompt_files}")
+    except Exception as e:
+        logging.error(f"Failed to list prompt files: {e}")
+        prompt_files = []
     
     # Construct the prompt file path based on tenant
     prompt_path = os.path.join(prompts_dir, f"prompt-{tenant}.txt")
+    logging.info(f"Attempting to load prompt from: {prompt_path}")
     
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
             system_prompt = f.read()
-            logging.info(f"Loaded system prompt for tenant '{tenant}' from {prompt_path}")
+            logging.info(f"Successfully loaded system prompt for tenant '{tenant}' from {prompt_path}")
             return system_prompt
     except Exception as e:
         logging.error(f"Failed to load system prompt for tenant '{tenant}' from {prompt_path}: {e}")
@@ -174,15 +191,18 @@ def load_system_prompt(tenant="bakery"):
         if tenant != "bakery":
             try:
                 default_prompt_path = os.path.join(prompts_dir, "prompt-bakery.txt")
+                logging.info(f"Attempting to load default prompt from: {default_prompt_path}")
                 with open(default_prompt_path, "r", encoding="utf-8") as f:
                     system_prompt = f.read()
-                    logging.info(f"Loaded default bakery prompt for tenant '{tenant}' from {default_prompt_path}")
+                    logging.info(f"Successfully loaded default bakery prompt for tenant '{tenant}' from {default_prompt_path}")
                     return system_prompt
             except Exception as e2:
                 logging.error(f"Failed to load default bakery prompt: {e2}")
         
         # Return a basic fallback prompt if no files can be loaded
-        return f"You are a receptionist at a {tenant if tenant else 'bakery'}. Be polite and helpful."
+        fallback_prompt = f"You are a receptionist at a {tenant if tenant else 'bakery'}. Be polite and helpful."
+        logging.warning(f"Using fallback prompt for tenant '{tenant}': {fallback_prompt}")
+        return fallback_prompt
 
 # Function to create Gemini configuration with tenant-specific prompt
 def create_gemini_config(tenant="bakery"):
