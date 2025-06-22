@@ -370,9 +370,16 @@ class GeminiSession:
                 self.call_sid = start_data.get("call_sid")
                 self.account_sid = start_data.get("account_sid")
                 
+                # Check for tenant in custom_parameters
+                if "custom_parameters" in start_data and "tenant" in start_data["custom_parameters"]:
+                    new_tenant = start_data["custom_parameters"]["tenant"]
+                    if new_tenant in ["bakery", "saloon"]:
+                        self.logger.info(f"Found tenant '{new_tenant}' in custom_parameters")
+                        self.tenant = new_tenant
+                
                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
                 self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
-                self.logger.info(f"Using tenant '{self.tenant}' from URL query parameters")
+                self.logger.info(f"Using tenant '{self.tenant}' for this session")
                 
                 # Initialize Gemini session with the tenant (possibly updated from message)
                 self.logger.info(f"Initializing Gemini session for tenant '{self.tenant}'")
