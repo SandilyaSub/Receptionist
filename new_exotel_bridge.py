@@ -856,22 +856,45 @@ class ExotelGeminiBridge:
         Returns:
             The tenant identifier (e.g., 'bakery', 'saloon')
         """
+        # Log the raw path for debugging
+        self.logger.info(f"Raw WebSocket path: '{path}'")
+        
         # Remove leading and trailing slashes
         clean_path = path.strip('/')
+        self.logger.info(f"Cleaned path: '{clean_path}'")
         
         # Split the path into segments
         segments = clean_path.split('/')
+        self.logger.info(f"Path segments: {segments}")
         
         # If the path is empty or just 'media', use the default tenant
-        if not segments or segments[0] == 'media':
+        if not segments or segments[0] == 'media' or segments[0] == '':
+            self.logger.info(f"Using default tenant 'bakery' for path '{path}'")
             return 'bakery'  # Default tenant
         
-        # If the path is like '/bakery' or '/saloon', use that as the tenant
-        # If the path is like '/bakery/media' or '/saloon/media', use the first segment
-        tenant = segments[0]
+        # Handle Railway's path format which might include the full URL
+        if segments[0].startswith('http') or segments[0].startswith('ws'):
+            self.logger.info(f"Detected full URL in path: '{segments[0]}'")
+            # Extract the hostname part and look for tenant in the remaining segments
+            if len(segments) > 1:
+                tenant = segments[1]  # The tenant might be the second segment
+                self.logger.info(f"Using second segment as tenant: '{tenant}'")
+            else:
+                self.logger.info(f"No tenant found in URL path, using default 'bakery'")
+                tenant = 'bakery'
+        else:
+            # If the path is like '/bakery' or '/saloon', use that as the tenant
+            tenant = segments[0]
+            self.logger.info(f"Using first segment as tenant: '{tenant}'")
         
-        # Log the tenant detection
-        self.logger.info(f"Detected tenant '{tenant}' from path '{path}'")
+        # Validate the tenant against known tenants
+        known_tenants = ['bakery', 'saloon']
+        if tenant not in known_tenants:
+            self.logger.warning(f"Unknown tenant '{tenant}', falling back to 'bakery'")
+            tenant = 'bakery'
+        
+        # Log the final tenant detection
+        self.logger.info(f"Final tenant detection: '{tenant}' from path '{path}'")
         
         return tenant
     
