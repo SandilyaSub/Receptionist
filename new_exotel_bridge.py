@@ -816,19 +816,27 @@ class ExotelGeminiBridge:
         self.active_sessions: Dict[str, GeminiSession] = {}
         self.logger = logging.getLogger("ExotelGeminiBridge")
     
-    async def handle_connection(self, websocket, path):
-        """Handle a new WebSocket connection.
+    async def handle_connection(self, websocket, path, tenant=None):
+        """Handle a WebSocket connection.
         
         Args:
             websocket: The WebSocket connection
-            path: The WebSocket path requested by the client
+            path: The WebSocket path
+            tenant: Optional explicit tenant identifier. If None, will be parsed from path.
         """
-        # Parse the tenant from the path
-        tenant = self._parse_tenant_from_path(path)
-        
         # Generate a unique session ID
         session_id = str(uuid.uuid4())
+        
+        # Parse the tenant from the path if not explicitly provided
+        if tenant is None:
+            tenant = self._parse_tenant_from_path(path)
+            self.logger.info(f"Parsed tenant from path: {tenant}")
+        else:
+            self.logger.info(f"Using explicitly provided tenant: {tenant}")
+        
         self.logger.info(f"New connection: {session_id} for tenant '{tenant}'")
+        self.logger.info(f"Connection path: {path}")
+        self.logger.info(f"Final tenant used: {tenant}")
         
         # Create a new session with the tenant
         session = GeminiSession(session_id, websocket, tenant)
@@ -908,12 +916,42 @@ class ExotelGeminiBridge:
             if path is None:
                 try:
                     path = websocket.path
+                    self.logger.info(f"Got path from websocket.path: {path}")
                 except AttributeError:
                     # If we can't get the path, assume it's the default path
                     path = '/media'
+                    self.logger.info(f"No path attribute, using default: {path}")
+            else:
+                self.logger.info(f"Path provided directly to handler: {path}")
             
-            # Handle the connection with the path
-            await self.handle_connection(websocket, path)
+            # Direct tenant parsing in the handler for Railway compatibility
+            tenant = 'bakery'  # Default tenant
+            
+            # Log the raw path
+            self.logger.info(f"Raw WebSocket path in handler: '{path}'")
+            
+            # Simple but robust tenant extraction
+            if path:
+                # Remove any query parameters
+                clean_path = path.split('?')[0]
+                # Remove leading and trailing slashes
+                clean_path = clean_path.strip('/')
+                # Split by slashes
+                parts = clean_path.split('/')
+                
+                self.logger.info(f"Path parts: {parts}")
+                
+                # Check for known tenants in the path parts
+                for part in parts:
+                    if part in ['saloon', 'bakery']:
+                        tenant = part
+                        self.logger.info(f"Found tenant in path: {tenant}")
+                        break
+            
+            self.logger.info(f"Final tenant determination: {tenant}")
+            
+            # Handle the connection with the path and explicit tenant
+            await self.handle_connection(websocket, path, tenant)
         
         # Start the server
         server = await websockets.serve(
