@@ -290,9 +290,6 @@ class GeminiSession:
         # Will be initialized later
         self.gemini_session = None
         
-        # Initialize audio processing
-        self.audio_processor = AudioProcessor()
-        
         # Initialize state
         self.stream_sid = None
         self.call_sid = None
