@@ -29,7 +29,7 @@ import argparse
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = "AIzaSyDmnCmel5kqMzi7ShnbNiYrcUxzA_kaDkM"
+
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
