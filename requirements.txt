@@ -6,6 +6,9 @@ websockets>=11.0.3
 # Google Gemini
 google-genai>=0.1.0
 
+# Database
+supabase>=2.0.0
+
 # Utilities
 python-dotenv
 

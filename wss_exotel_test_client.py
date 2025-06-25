@@ -406,9 +406,15 @@ def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="WSS Exotel Test Client")
     parser.add_argument(
+        "--environment",
+        choices=["local", "railway"],
+        default="railway",
+        help="Environment to connect to (local or railway)"
+    )
+    parser.add_argument(
         "--server", 
-        default="wss://receptionist-production.up.railway.app",
-        help="Base WebSocket server URL (default: wss://receptionist-production.up.railway.app)"
+        default=None,
+        help="Custom WebSocket server URL (overrides --environment if provided)"
     )
     parser.add_argument(
         "--tenant",
@@ -416,10 +422,27 @@ def main():
         default="bakery",
         help="Tenant to connect to (bakery, saloon, or media for backward compatibility)"
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port number for local server (only used when --environment=local)"
+    )
     args = parser.parse_args()
     
+    # Determine the base server URL based on environment
+    if args.server:
+        # Custom server URL provided, use it directly
+        base_url = args.server
+    elif args.environment == "local":
+        # Local environment
+        base_url = f"ws://0.0.0.0:{args.port}"
+    else:
+        # Railway environment (default)
+        base_url = "wss://receptionist-production.up.railway.app"
+    
     # Construct the full URL with tenant path
-    full_url = f"{args.server}/{args.tenant}"
+    full_url = f"{base_url}/{args.tenant}"
     print(f"Connecting to tenant: {args.tenant} at URL: {full_url}")
     
     # Run the interactive client
