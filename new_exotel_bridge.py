@@ -1013,13 +1013,13 @@ class GeminiSession:
         # (Placeholder for the next step)
         # await self.analyze_transcript_for_booking()
 
-        # 3. Final resource cleanup
-        if self.audio_stream and not self.audio_stream.is_stopped():
+        # 3. Final resource cleanup - check for attribute existence first
+        if hasattr(self, 'audio_stream') and self.audio_stream and not self.audio_stream.is_stopped():
             self.logger.info("Closing audio stream.")
             self.audio_stream.close()
             self.audio_stream = None
 
-        if self.gemini_session:
+        if hasattr(self, 'gemini_session') and self.gemini_session:
             self.logger.info("Closing Gemini session.")
             self.gemini_session.close()
             self.gemini_session = None
