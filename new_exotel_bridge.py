@@ -17,6 +17,7 @@ import warnings
 import sys
 from datetime import datetime
 from typing import Dict, Optional
+import httpx
 
 # Directory to store call transcripts
 CALL_DETAILS_DIR = "call_details"
@@ -992,21 +993,90 @@ class GeminiSession:
             self.logger.error(f"Error in keep-alive task: {e}")
     
     async def cleanup(self):
-        """Clean up resources for this session."""
-        self.logger.info("Cleaning up session resources")
+        """Triggers the non-blocking, asynchronous cleanup process."""
+        self.logger.info(f"Triggering async cleanup for session {self.session_id}")
+        asyncio.create_task(self.run_post_call_processing())
 
-        
-        # Save transcript to Supabase
+    async def run_post_call_processing(self):
+        """Runs all post-call tasks in the background without blocking."""
+        self.logger.info(f"Starting background post-call processing for {self.session_id}")
+
+        # 1. Save the raw transcript first - this is critical.
         if self.transcript_manager:
-            try:
-                self.transcript_manager.save_transcript()
-            except Exception as e:
-                self.logger.error(f"Error calling save_transcript: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            self.logger.debug(f"No transcript manager available for session {self.session_id}")
+            self.logger.info("Saving transcript...")
+            self.transcript_manager.save_transcript()
+
+        # 2. Fetch Exotel details and analyze transcript in parallel
+        if self.call_sid:
+            await self.fetch_and_store_exotel_details()
         
+        # (Placeholder for the next step)
+        # await self.analyze_transcript_for_booking()
+
+        # 3. Final resource cleanup
+        if self.audio_stream and not self.audio_stream.is_stopped():
+            self.logger.info("Closing audio stream.")
+            self.audio_stream.close()
+            self.audio_stream = None
+
+        if self.gemini_session:
+            self.logger.info("Closing Gemini session.")
+            self.gemini_session.close()
+            self.gemini_session = None
+
+        self.logger.info(f"Background post-call processing finished for {self.session_id}")
+
+    async def fetch_and_store_exotel_details(self):
+        """Fetches call details from Exotel and stores them in Supabase."""
+        self.logger.info(f"Fetching Exotel call details for call_sid: {self.call_sid}")
+        
+        api_key = os.environ.get("EXOTEL_API_KEY_USERNAME")
+        api_token = os.environ.get("EXOTEL_API_KEY_PASSWORD")
+        account_sid = os.environ.get("EXOTEL_ACCOUNT_SID")
+
+        if not all([api_key, api_token, account_sid]):
+            self.logger.error("Exotel API credentials or Account SID are not configured.")
+            return
+
+        url = f"https://api.exotel.com/v1/Accounts/{account_sid}/Calls/{self.call_sid}.json"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, auth=(api_key, api_token))
+                response.raise_for_status() # Raises an exception for 4XX/5XX responses
+                
+                call_details = response.json().get("Call")
+                if not call_details:
+                    self.logger.error("Exotel API response did not contain 'Call' details.")
+                    return
+
+                # Prepare data for Supabase
+                data_to_insert = {
+                    "call_sid": call_details.get("Sid"),
+                    "from_number": call_details.get("From"),
+                    "to_number": call_details.get("To"),
+                    "status": call_details.get("Status"),
+                    "start_time": call_details.get("StartTime"),
+                    "end_time": call_details.get("EndTime"),
+                    "duration": call_details.get("Duration"),
+                    "price": call_details.get("Price"),
+                    "direction": call_details.get("Direction"),
+                    "recording_url": call_details.get("RecordingUrl")
+                }
+
+                # Insert into Supabase
+                if supabase:
+                    self.logger.info(f"Inserting call details into Supabase for call_sid: {self.call_sid}")
+                    supabase.table("exotel_call_details").insert(data_to_insert).execute()
+                    self.logger.info("Successfully saved Exotel call details to Supabase.")
+                else:
+                    self.logger.error("Supabase client not available to save Exotel details.")
+
+        except httpx.HTTPStatusError as e:
+            self.logger.error(f"HTTP error fetching Exotel details: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred while fetching Exotel details: {e}")
+
         # Close the Gemini session if it exists
         if self.gemini_session:
             try:
