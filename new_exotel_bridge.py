@@ -147,7 +147,7 @@ logging.basicConfig(
 )
 
 # Suppress verbose warnings from the Gemini library
-logging.getLogger('google.generativeai').setLevel(logging.ERROR)
+logging.getLogger('google_genai').setLevel(logging.ERROR)
 
 # Load environment variables from .env file
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
