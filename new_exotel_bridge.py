@@ -73,7 +73,7 @@ class TranscriptManager:
             data, count = self.supabase_client.table("call_transcripts").insert(data_to_insert).execute()
             
             self.logger.info(f"Successfully saved transcript to Supabase for session {self.session_id}")
-
+            print(f"TRANSCRIPT SAVED TO SUPABASE: session_id={self.session_id}")
         except Exception as e:
             self.logger.error(f"Error saving transcript to Supabase: {e}")
             import traceback
@@ -137,17 +137,17 @@ os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"exotel_bridge_{int(time.time())}.log")
 
 # Configure logging
-# Suppress verbose warnings from the Gemini library
-logging.getLogger('google.generativeai').setLevel(logging.ERROR)
-
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
+
+# Suppress verbose warnings from the Gemini library
+logging.getLogger('google.generativeai').setLevel(logging.ERROR)
 
 # Load environment variables from .env file
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -785,16 +785,14 @@ class GeminiSession:
                             # Process input audio transcription (user speech)
                             if hasattr(response.server_content, 'input_transcription') and response.server_content.input_transcription:
                                 user_text = response.server_content.input_transcription.text
-                                # Print user transcript clearly to terminal
-                                print(f"\n[USER TRANSCRIPT]: {user_text}\n")
+                                # User transcript is now handled by TranscriptManager
                                 if self.transcript_manager:
                                     self.transcript_manager.add_to_transcript("user", user_text)
                                     
                             # Process output audio transcription (model speech)
                             if hasattr(response.server_content, 'output_transcription') and response.server_content.output_transcription:
                                 model_text = response.server_content.output_transcription.text
-                                # Print model transcript clearly to terminal
-                                print(f"\n[MODEL TRANSCRIPT]: {model_text}\n")
+                                # Model transcript is now handled by TranscriptManager
                                 if self.transcript_manager:
                                     self.transcript_manager.add_to_transcript("assistant", model_text)
                             
