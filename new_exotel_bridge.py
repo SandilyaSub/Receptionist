@@ -528,9 +528,9 @@ class GeminiSession:
                 finally:
                     # Always call cleanup to ensure transcript is saved
                     try:
-                        self.logger.info(f"Running cleanup for session {self.session_id}")
-                        await self.cleanup()
-                        self.logger.info(f"Cleanup completed for session {self.session_id}")
+                        self.logger.info(f"Triggering cleanup for session {self.session_id}")
+                        self.cleanup()
+                        self.logger.info(f"Cleanup triggered for session {self.session_id}")
                     except Exception as cleanup_error:
                         self.logger.error(f"Error during cleanup: {cleanup_error}")
                         import traceback
@@ -543,7 +543,7 @@ class GeminiSession:
             traceback.print_exc()
             # Even on error, try to save the transcript
             try:
-                await self.cleanup()
+                self.cleanup()
             except Exception as cleanup_error:
                 self.logger.error(f"Error during cleanup after exception: {cleanup_error}")
                 traceback.print_exc()
@@ -992,7 +992,7 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error in keep-alive task: {e}")
     
-    async def cleanup(self):
+    def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
         asyncio.create_task(self.run_post_call_processing())
@@ -1021,7 +1021,7 @@ class GeminiSession:
 
         if hasattr(self, 'gemini_session') and self.gemini_session:
             self.logger.info("Closing Gemini session.")
-            self.gemini_session.close()
+            await self.gemini_session.close()
             self.gemini_session = None
 
         self.logger.info(f"Background post-call processing finished for {self.session_id}")
