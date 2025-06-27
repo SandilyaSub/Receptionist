@@ -37,7 +37,7 @@ class TranscriptManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.final_model_text = ""
         self.supabase_client = supabase
-        self.parser_model = genai.GenerativeModel('gemini-1.5-flash')
+        self.parser_model = genai.GenerativeModel('gemini-2.5-flash')
 
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
