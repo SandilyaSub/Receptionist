@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Bridge - Interactive Client</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 600px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .controls button {
+            padding: 10px 15px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        #connectButton { background-color: #28a745; color: white; }
+        #connectButton:hover { background-color: #218838; }
+        #disconnectButton { background-color: #dc3545; color: white; }
+        #disconnectButton:hover { background-color: #c82333; }
+        #recordButton { background-color: #007bff; color: white; }
+        #recordButton:hover { background-color: #0069d9; }
+        .status, .transcript {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #e9ecef;
+            min-height: 50px;
+        }
+        .transcript p { margin: 5px 0; }
+        audio { margin-top: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gemini Bridge - Interactive Test</h1>
+
+        <div class="controls">
+            <button id="connectButton">Connect</button>
+            <button id="disconnectButton" disabled>Disconnect</button>
+            <button id="recordButton" disabled>Start Recording</button>
+        </div>
+
+        <div class="status" id="statusArea">
+            <p>Status: Not Connected</p>
+        </div>
+
+        <audio id="audioPlayback" controls></audio>
+
+        <div class="transcript" id="transcriptArea">
+            <p><em>Transcript will appear here...</em></p>
+        </div>
+    </div>
+
+    <script src="interactive_client.js"></script>
+</body>
+</html>
