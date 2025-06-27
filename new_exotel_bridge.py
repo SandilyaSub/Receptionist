@@ -390,6 +390,7 @@ class GeminiSession:
         self.websocket = websocket
         self.tenant = tenant  # Store the initial tenant
         self.logger = logging.getLogger(f"GeminiSession-{session_id}")
+        self.shutdown_event = asyncio.Event()
         
         # Will be initialized later
         self.gemini_session = None
@@ -708,9 +709,8 @@ class GeminiSession:
         finally:
             # This block is critical. It runs when the `async for` loop exits,
             # which happens when the Exotel connection closes.
-            self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
-            if self.gemini_session:
-                await self.gemini_session.close()
+            self.logger.info("Exotel listening loop finished. Signaling other tasks to shut down.")
+            self.shutdown_event.set()
     
     async def receive_from_gemini(self):
         """Receive responses from Gemini and send to Exotel."""
@@ -726,7 +726,7 @@ class GeminiSession:
         
         try:
             # Process responses from Gemini with retry logic
-            while True:
+            while not self.shutdown_event.is_set():
                 # Check if WebSocket is still open
                 websocket_open = True
                 try:
