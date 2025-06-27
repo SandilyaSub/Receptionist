@@ -29,15 +29,16 @@ os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
 # TranscriptManager class for saving conversation transcripts
 class TranscriptManager:
     """Manages the conversation transcript, parses it, and saves details to Supabase."""
-    def __init__(self, session_id=None, call_sid=None, tenant=None):
+    def __init__(self, supabase_client, gemini_client, session_id=None, call_sid=None, tenant=None):
         self.session_id = session_id or str(uuid.uuid4())
         self.call_sid = call_sid
         self.tenant = tenant
         self.transcript_data = {"session_id": self.session_id, "conversation": []}
         self.logger = logging.getLogger(self.__class__.__name__)
         self.final_model_text = ""
-        self.supabase_client = supabase
-        self.parser_model = genai.GenerativeModel('gemini-2.5-flash')
+        # Injected dependencies
+        self.supabase_client = supabase_client
+        self.gemini_client = gemini_client
 
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
@@ -50,8 +51,8 @@ class TranscriptManager:
 
     async def _get_structured_data_from_transcript(self):
         """Uses a parser model to extract structured data from the transcript."""
+        # Step 1: Load the parser prompt for the tenant
         try:
-            # Load the specific parser prompt for the tenant
             script_dir = os.path.dirname(os.path.abspath(__file__))
             parser_prompt_path = os.path.join(script_dir, 'prompts', self.tenant, f'prompt-{self.tenant}-parser.txt')
             with open(parser_prompt_path, 'r', encoding='utf-8') as f:
@@ -60,19 +61,40 @@ class TranscriptManager:
             self.logger.error(f"Failed to load parser prompt for tenant '{self.tenant}': {e}")
             return None
 
-        # Format the transcript into a simple string for the parser
+        # Step 2: Format the transcript into a simple string
         transcript_string = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in self.transcript_data['conversation']])
+        if not transcript_string:
+            self.logger.warning(f"Transcript is empty for session {self.session_id}. Skipping parsing.")
+            return None
         
         full_prompt = f"{parser_prompt}\n\n--- Call Transcript ---\n{transcript_string}"
-
         self.logger.info(f"Sending transcript to parser model for session {self.session_id}")
+
+        # Step 3: Call the Gemini API using the correct client pattern
         try:
-            response = await self.parser_model.generate_content_async(full_prompt)
-            # Clean up the response to get only the JSON
+            contents = [
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=full_prompt)],
+                ),
+            ]
+            
+            response = await self.gemini_client.models.generate_content_async(
+                model="gemini-2.5-flash",
+                contents=contents
+            )
+            
+            # Step 4: Clean up and parse the JSON response
             json_text = response.text.strip().replace("```json", "").replace("```", "").strip()
             parsed_data = json.loads(json_text)
             self.logger.info(f"Successfully parsed data for session {self.session_id}: {parsed_data}")
             return parsed_data
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to decode JSON from parser model for session {self.session_id}: {e}")
+            # It's useful to log the raw response that failed to parse
+            self.logger.error(f"Raw model response was: {getattr(response, 'text', 'N/A')}")
+            return None
         except Exception as e:
             self.logger.error(f"Failed to parse transcript for session {self.session_id}: {e}")
             return None
@@ -286,20 +308,6 @@ try:
 except ImportError:
     pass
 
-# Check if API key is available
-if not GEMINI_API_KEY:
-    logging.error("GEMINI_API_KEY environment variable not set")
-    raise ValueError("GEMINI_API_KEY environment variable must be set")
-
-# Initialize Gemini client with increased timeout
-client = genai.Client(
-    http_options={
-        "api_version": "v1beta",
-        "timeout": 60.0,  # Increase timeout to 60 seconds
-    },
-    api_key=GEMINI_API_KEY,
-)
-
 # Load system prompt from file
 def load_system_prompt(tenant="bakery"):
     """Load system prompt from a file based on the new tenant directory structure.
@@ -418,19 +426,25 @@ def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int
 class GeminiSession:
     """A session with Gemini for a single WebSocket connection."""
     
-    def __init__(self, session_id, websocket, tenant="bakery"):
+    def __init__(self, supabase_client, gemini_client, session_id, websocket, tenant="bakery"):
         """Initialize a new session.
         
         Args:
-            session_id: A unique identifier for this session
-            websocket: The WebSocket connection
-            tenant: The tenant identifier (e.g., 'bakery', 'saloon')
+            supabase_client: The initialized Supabase client.
+            gemini_client: The initialized Gemini client.
+            session_id: A unique identifier for this session.
+            websocket: The WebSocket connection.
+            tenant: The tenant identifier (e.g., 'bakery', 'saloon').
         """
         self.session_id = session_id
         self.websocket = websocket
         self.tenant = tenant  # Store the initial tenant
         self.logger = logging.getLogger(f"GeminiSession-{session_id}")
         self.shutdown_event = asyncio.Event()
+        
+        # Injected dependencies
+        self.supabase_client = supabase_client
+        self.gemini_client = gemini_client
         
         # Will be initialized later
         self.gemini_session = None
@@ -471,7 +485,7 @@ class GeminiSession:
         for attempt in range(max_retries):
             try:
                 # Use async with to properly handle the AsyncGeneratorContextManager
-                self.gemini_session = client.aio.live.connect(
+                self.gemini_session = self.gemini_client.aio.live.connect(
                     model="models/gemini-2.5-flash-preview-native-audio-dialog",
                     config=tenant_config
                 )
@@ -534,6 +548,8 @@ class GeminiSession:
                     
                     # Create transcript manager with call details
                     self.transcript_manager = TranscriptManager(
+                        supabase_client=self.supabase_client,
+                        gemini_client=self.gemini_client,
                         call_sid=self.call_sid,
                         session_id=self.session_id,
                         tenant=self.tenant
@@ -1108,9 +1124,9 @@ class GeminiSession:
                 }
 
                 # Insert into Supabase
-                if supabase:
+                if self.supabase_client:
                     self.logger.info(f"Inserting call details into Supabase for call_sid: {self.call_sid}")
-                    supabase.table("exotel_call_details").insert(data_to_insert).execute()
+                    self.supabase_client.table("exotel_call_details").insert(data_to_insert).execute()
                     self.logger.info("Successfully saved Exotel call details to Supabase.")
                 else:
                     self.logger.error("Supabase client not available to save Exotel details.")
@@ -1140,15 +1156,19 @@ class GeminiSession:
 class ExotelGeminiBridge:
     """Main server class that manages WebSocket connections and Gemini sessions."""
     
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765, base_path: str = "/"):
+    def __init__(self, supabase_client: Client, gemini_client, host: str = "0.0.0.0", port: int = 8765, base_path: str = "/"):
         """
         Initialize the ExotelGeminiBridge server.
         
         Args:
-            host: Host address to bind the server to
-            port: Port to listen on
-            base_path: Base WebSocket endpoint path
+            supabase_client: The initialized Supabase client.
+            gemini_client: The initialized Gemini client.
+            host: Host address to bind the server to.
+            port: Port to listen on.
+            base_path: Base WebSocket endpoint path.
         """
+        self.supabase_client = supabase_client
+        self.gemini_client = gemini_client
         self.host = host
         self.port = port
         self.base_path = base_path
@@ -1157,8 +1177,8 @@ class ExotelGeminiBridge:
         
         # Ensure call_details directory exists at startup
         try:
-            os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-            self.logger.info(f"Created call_details directory at {os.path.abspath(CALL_DETAILS_DIR)}")
+            os.makedirs("call_details", exist_ok=True)
+            self.logger.info(f"Created call_details directory at {os.path.abspath('call_details')}")
         except Exception as e:
             self.logger.error(f"Failed to create call_details directory: {e}")
             import traceback
@@ -1169,80 +1189,42 @@ class ExotelGeminiBridge:
         
         Args:
             websocket: The WebSocket connection
-            path: The WebSocket path
-            tenant: Optional explicit tenant identifier. If None, will be parsed from path.
+            path: The request path
+            tenant: The tenant identifier (e.g., 'bakery', 'saloon')
         """
-        # Generate a unique session ID
-        session_id = str(uuid.uuid4())
         
-        # Parse the tenant from the path if not explicitly provided
+        # Use the provided tenant or extract from path
         if tenant is None:
-            tenant = self._parse_tenant_from_path(path)
-            self.logger.info(f"Parsed tenant from path: {tenant}")
-        else:
-            self.logger.info(f"Using explicitly provided tenant: {tenant}")
+            # Extract tenant from path, default to 'bakery'
+            path_parts = path.strip('/').split('/')
+            if len(path_parts) > 0 and path_parts[0]:
+                tenant = path_parts[0]
+            else:
+                tenant = 'bakery' # Default tenant
         
-        self.logger.info(f"New connection: {session_id} for tenant '{tenant}'")
-        self.logger.info(f"Connection path: {path}")
-        self.logger.info(f"Final tenant used: {tenant}")
+        self.logger.info(f"New connection on path: {path} for tenant: {tenant}")
         
-        # Create a new session with the tenant
-        session = GeminiSession(session_id, websocket, tenant)
+        session_id = str(uuid.uuid4())
+        session = GeminiSession(
+            supabase_client=self.supabase_client,
+            gemini_client=self.gemini_client,
+            session_id=session_id,
+            websocket=websocket,
+            tenant=tenant
+        )
         self.active_sessions[session_id] = session
         
         try:
-            # Run the session
             await session.run()
-        except websockets.exceptions.ConnectionClosed as e:
-            self.logger.info(f"Connection closed: {session_id} - {e}")
         except Exception as e:
             self.logger.error(f"Error in session {session_id}: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
-            # Clean up the session
+            self.logger.info(f"Session {session_id} ended")
             if session_id in self.active_sessions:
                 del self.active_sessions[session_id]
-            self.logger.info(f"Session ended: {session_id}")
-            
-    def _parse_tenant_from_path(self, path):
-        """Parse the tenant from the WebSocket path.
-        
-        Args:
-            path: The WebSocket path
-            
-        Returns:
-            The tenant identifier (e.g., 'bakery', 'saloon')
-        """
-        # Log the raw path for debugging
-        self.logger.info(f"Raw WebSocket path: '{path}'")
-        
-        # Remove leading and trailing slashes
-        clean_path = path.strip('/')
-        self.logger.info(f"Cleaned path: '{clean_path}'")
-        
-        # Split the path into segments
-        segments = clean_path.split('/')
-        self.logger.info(f"Path segments: {segments}")
-        
-        # If the path is empty or just 'media', use the default tenant
-        if not segments or segments[0] == 'media' or segments[0] == '':
-            self.logger.info(f"Using default tenant 'bakery' for path '{path}'")
-            return 'bakery'  # Default tenant
-        
-        # Handle Railway's path format which might include the full URL
-        if segments[0].startswith('http') or segments[0].startswith('ws'):
-            self.logger.info(f"Detected full URL in path: '{segments[0]}'")
-            # Extract the hostname part and look for tenant in the remaining segments
-            if len(segments) > 1:
-                tenant = segments[1]  # The tenant might be the second segment
-                self.logger.info(f"Using second segment as tenant: '{tenant}'")
-            else:
-                self.logger.info(f"No tenant found in URL path, using default 'bakery'")
-                tenant = 'bakery'
-        else:
-            # If the path is like '/bakery' or '/saloon', use that as the tenant
-            tenant = segments[0]
-            self.logger.info(f"Using first segment as tenant: '{tenant}'")
-        
+            session.cleanup()
         # Validate the tenant against known tenants
         known_tenants = ['bakery', 'saloon']
         if tenant not in known_tenants:
@@ -1334,25 +1316,64 @@ class ExotelGeminiBridge:
 
 # Main entry point
 async def main():
+    """Main entry point for the application."""
+    # Load environment variables from .env file
+    load_dotenv()
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("server.log")
+        ]
+    )
+
     # Parse command line arguments
     import argparse
-    import sys
     parser = argparse.ArgumentParser(description='Multi-tenant Exotel-Gemini Bridge server')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to')
     parser.add_argument('--port', type=int, default=None, help='Port to listen on (overrides PORT env var)')
     parser.add_argument('--base-path', type=str, default='/', help='Base WebSocket endpoint path')
     args = parser.parse_args()
 
-    # Check if API key is available
-    if not GEMINI_API_KEY:
-        logging.error("GEMINI_API_KEY environment variable not set. Please set it and try again.")
-        sys.exit(1)
+    # Initialize Supabase client
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_API_KEY")
+
+    if not supabase_url or not supabase_key:
+        logging.error("Supabase URL or Key not found in environment variables.")
+        return
+
+    try:
+        supabase_client = create_client(supabase_url, supabase_key)
+        logging.info("Supabase client initialized successfully.")
+    except Exception as e:
+        logging.error(f"Failed to initialize Supabase client: {e}")
+        return
+
+    # Initialize Gemini client
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logging.error("GEMINI_API_KEY not found in environment variables.")
+        return
+
+    # Initialize the Gemini client
+    gemini_client = genai.Client(api_key=api_key)
+    logging.info("Gemini client initialized successfully.")
 
     # Get port from environment variable (for Railway) or use command line argument or default
     port = args.port if args.port is not None else int(os.environ.get('PORT', DEFAULT_PORT))
 
     # Create and start the server
-    server = ExotelGeminiBridge(host=args.host, port=port, base_path=args.base_path)
+    server = ExotelGeminiBridge(
+        supabase_client=supabase_client,
+        gemini_client=gemini_client,
+        host=args.host,
+        port=port,
+        base_path=args.base_path
+    )
     await server.start_server()
 
 
