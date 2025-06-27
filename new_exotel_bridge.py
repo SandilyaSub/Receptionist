@@ -705,6 +705,12 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error in receive_from_exotel: {e}")
             raise
+        finally:
+            # This block is critical. It runs when the `async for` loop exits,
+            # which happens when the Exotel connection closes.
+            self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
+            if self.gemini_session:
+                await self.gemini_session.close()
     
     async def receive_from_gemini(self):
         """Receive responses from Gemini and send to Exotel."""
