@@ -79,8 +79,9 @@ class TranscriptManager:
                 ),
             ]
             
-            response = await self.gemini_client.models.generate_content_async(
-                model="gemini-2.5-flash",
+            # Use the model directly from the client, not via client.models
+            model = self.gemini_client.get_model("models/gemini-2.5-flash")
+            response = await model.generate_content_async(
                 contents=contents
             )
             
@@ -456,6 +457,7 @@ class GeminiSession:
         self.sequence_number = 0
         self.audio_chunk_counter = 0
         self.is_speaking = False
+        self._cleanup_started = False # Flag to prevent duplicate cleanup
         
         # Initialize transcript manager (will be properly set up after we get call_sid)
         self.transcript_manager = None
@@ -1055,7 +1057,11 @@ class GeminiSession:
             self.logger.error(f"Error in keep-alive task: {e}")
     
     def cleanup(self):
-        """Triggers the non-blocking, asynchronous cleanup process."""
+        """Triggers the non-blocking, asynchronous cleanup process, ensuring it only runs once."""
+        if self._cleanup_started:
+            self.logger.info("Cleanup already in progress, skipping.")
+            return
+        self._cleanup_started = True
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
         asyncio.create_task(self.run_post_call_processing())
 
