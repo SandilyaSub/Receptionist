@@ -12,7 +12,6 @@ import json
 import logging
 import audioop
 import uuid
-import re
 import time
 import warnings
 import sys
@@ -28,17 +27,15 @@ os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
 
 # TranscriptManager class for saving conversation transcripts
 class TranscriptManager:
-    """Manages the conversation transcript, parses it, and saves details to Supabase."""
-    def __init__(self, supabase_client, gemini_client, session_id=None, call_sid=None, tenant=None):
+    """Manages the conversation transcript and saves it to Supabase."""
+    def __init__(self, session_id=None, call_sid=None, tenant=None):
         self.session_id = session_id or str(uuid.uuid4())
         self.call_sid = call_sid
         self.tenant = tenant
         self.transcript_data = {"session_id": self.session_id, "conversation": []}
         self.logger = logging.getLogger(self.__class__.__name__)
         self.final_model_text = ""
-        # Injected dependencies
-        self.supabase_client = supabase_client
-        self.gemini_client = gemini_client
+        self.supabase_client = supabase
 
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
@@ -49,113 +46,39 @@ class TranscriptManager:
         """Returns the full transcript data."""
         return self.transcript_data
 
-    async def _get_structured_data_from_transcript(self):
-        """Uses a parser model to extract structured data from the transcript."""
-        # Step 1: Load the parser prompt for the tenant
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            parser_prompt_path = os.path.join(script_dir, 'prompts', self.tenant, f'prompt-{self.tenant}-parser.txt')
-            with open(parser_prompt_path, 'r', encoding='utf-8') as f:
-                parser_prompt = f.read()
-        except Exception as e:
-            self.logger.error(f"Failed to load parser prompt for tenant '{self.tenant}': {e}")
-            return None
-
-        # Step 2: Format the transcript into a simple string
-        transcript_string = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in self.transcript_data['conversation']])
-        if not transcript_string:
-            self.logger.warning(f"Transcript is empty for session {self.session_id}. Skipping parsing.")
-            return None
-        
-        full_prompt = f"{parser_prompt}\n\n--- Call Transcript ---\n{transcript_string}"
-        self.logger.info(f"Sending transcript to parser model for session {self.session_id}")
-
-        # Step 3: Call the Gemini API using the correct client pattern
-        try:
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=full_prompt)],
-                ),
-            ]
-            
-            # Use the model directly from the client, not via client.models
-            model = self.gemini_client.get_model("models/gemini-2.5-flash")
-            response = await model.generate_content_async(
-                contents=contents
-            )
-            
-            # Step 4: Clean up and parse the JSON response
-            json_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-            parsed_data = json.loads(json_text)
-            self.logger.info(f"Successfully parsed data for session {self.session_id}: {parsed_data}")
-            return parsed_data
-
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to decode JSON from parser model for session {self.session_id}: {e}")
-            # It's useful to log the raw response that failed to parse
-            self.logger.error(f"Raw model response was: {getattr(response, 'text', 'N/A')}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Failed to parse transcript for session {self.session_id}: {e}")
-            return None
-
-    async def save_call_details(self):
-        """Saves the full transcript, then parses it and updates the record with structured data."""
+    def save_transcript(self):
+        """Saves the transcript to the 'call_details' table in Supabase."""
         if not self.supabase_client:
-            self.logger.error("Supabase client not initialized. Cannot save call details.")
+            self.logger.error("Supabase client not initialized. Cannot save transcript.")
             return
-
-        # Add any final text from the model to the transcript
-        if self.final_model_text:
-            self.add_to_transcript("assistant", self.final_model_text)
 
         if not self.transcript_data.get("conversation"):
-            self.logger.warning("No conversation to save, skipping.")
+            self.logger.warning("No conversation to save, skipping transcript.")
             return
 
-        # --- Step 1: Insert the initial record with the raw transcript ---
+        # Add the final model text if it exists
+        if self.final_model_text:
+            self.add_to_transcript("assistant", self.final_model_text)
+            self.final_model_text = ""
+
         try:
-            initial_data = {
+            data_to_insert = {
                 "session_id": self.session_id,
                 "tenant": self.tenant,
                 "transcript": self.transcript_data,
                 "call_sid": self.call_sid
             }
-            self.logger.info(f"Inserting initial transcript for session {self.session_id}")
-            insert_result = self.supabase_client.table("call_details").insert(initial_data).execute()
-            # Check if the insert was successful and we have data to get the ID from
-            if not insert_result.data:
-                 self.logger.error(f"Failed to insert transcript for session {self.session_id}, no data returned.")
-                 return
-            # Get the primary key of the newly inserted row
-            record_id = insert_result.data[0]['id']
-            self.logger.info(f"Successfully inserted transcript with record ID: {record_id}")
-
+            
+            self.logger.info(f"Attempting to insert transcript for session {self.session_id} into Supabase.")
+            # The table name in Supabase is 'call_transcripts'
+            data, count = self.supabase_client.table("call_transcripts").insert(data_to_insert).execute()
+            
+            self.logger.info(f"Successfully saved transcript to Supabase for session {self.session_id}")
+            print(f"TRANSCRIPT SAVED TO SUPABASE: session_id={self.session_id}")
         except Exception as e:
-            self.logger.error(f"Error inserting initial transcript to Supabase: {e}")
-            return # Stop if we can't even insert the basic transcript
-
-        # --- Step 2: Parse the transcript to get structured data ---
-        structured_data = await self._get_structured_data_from_transcript()
-
-        if not structured_data:
-            self.logger.warning(f"No structured data was parsed for session {self.session_id}. Record will not be updated.")
-            return
-
-        # --- Step 3: Update the record with the new structured data ---
-        try:
-            update_data = {
-                "call_type": structured_data.get("call_type"),
-                "critical_call_details": structured_data.get("critical_call_details")
-            }
-            self.logger.info(f"Updating record {record_id} with parsed data.")
-            self.supabase_client.table("call_details").update(update_data).eq("id", record_id).execute()
-            self.logger.info(f"Successfully updated record {record_id} with structured details.")
-            print(f"CALL DETAILS SAVED AND PARSED: session_id={self.session_id}")
-
-        except Exception as e:
-            self.logger.error(f"Error updating record {record_id} with structured data: {e}")
+            self.logger.error(f"Error saving transcript to Supabase: {e}")
+            import traceback
+            traceback.print_exc()
 
 # For Python versions before 3.11, implement compatibility classes
 if sys.version_info < (3, 11):
@@ -309,48 +232,76 @@ try:
 except ImportError:
     pass
 
+# Check if API key is available
+if not GEMINI_API_KEY:
+    logging.error("GEMINI_API_KEY environment variable not set")
+    raise ValueError("GEMINI_API_KEY environment variable must be set")
+
+# Initialize Gemini client with increased timeout
+client = genai.Client(
+    http_options={
+        "api_version": "v1beta",
+        "timeout": 60.0,  # Increase timeout to 60 seconds
+    },
+    api_key=GEMINI_API_KEY,
+)
+
 # Load system prompt from file
 def load_system_prompt(tenant="bakery"):
-    """Load system prompt from a file based on the new tenant directory structure.
-
+    """Load system prompt from a file based on tenant.
+    
     Args:
         tenant: The tenant identifier (e.g., 'bakery', 'saloon')
-
+        
     Returns:
-        The system prompt as a string.
+        The system prompt as a string
     """
+    # Get the current script directory to use absolute paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Define the prompts directory with absolute path
     prompts_dir = os.path.join(script_dir, "prompts")
     
-    # New path structure: prompts/<tenant>/prompt-<tenant>-assistant.txt
-    prompt_path = os.path.join(prompts_dir, tenant, f"prompt-{tenant}-assistant.txt")
+    # Log the directories for debugging
+    logging.info(f"Script directory: {script_dir}")
+    logging.info(f"Prompts directory: {prompts_dir}")
+    logging.info(f"Current working directory: {os.getcwd()}")
+    
+    # List all files in the prompts directory for debugging
+    try:
+        prompt_files = os.listdir(prompts_dir)
+        logging.info(f"Available prompt files: {prompt_files}")
+    except Exception as e:
+        logging.error(f"Failed to list prompt files: {e}")
+        prompt_files = []
+    
+    # Construct the prompt file path based on tenant
+    prompt_path = os.path.join(prompts_dir, f"prompt-{tenant}.txt")
     logging.info(f"Attempting to load prompt from: {prompt_path}")
-
+    
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
             system_prompt = f.read()
             logging.info(f"Successfully loaded system prompt for tenant '{tenant}' from {prompt_path}")
             return system_prompt
-    except FileNotFoundError:
-        logging.error(f"Prompt file not found for tenant '{tenant}' at {prompt_path}. Trying default.")
-        # Fallback to the default bakery prompt if the specific tenant prompt is not found
-        default_prompt_path = os.path.join(prompts_dir, "bakery", "prompt-bakery-assistant.txt")
-        logging.info(f"Attempting to load default prompt from: {default_prompt_path}")
-        try:
-            with open(default_prompt_path, "r", encoding="utf-8") as f:
-                system_prompt = f.read()
-                logging.warning(f"Loaded default bakery prompt for tenant '{tenant}'.")
-                return system_prompt
-        except Exception as e:
-            logging.error(f"FATAL: Could not load even the default bakery prompt: {e}")
-            # If even the default fails, use a hardcoded, basic fallback
-            fallback_prompt = f"You are a helpful receptionist for {tenant}. Please assist the customer."
-            logging.warning(f"Using basic fallback prompt for tenant '{tenant}'.")
-            return fallback_prompt
     except Exception as e:
-        logging.error(f"An unexpected error occurred while loading prompt for tenant '{tenant}': {e}")
-        fallback_prompt = f"You are a helpful receptionist for {tenant}. Please assist the customer."
-        logging.warning(f"Using basic fallback prompt due to unexpected error for tenant '{tenant}'.")
+        logging.error(f"Failed to load system prompt for tenant '{tenant}' from {prompt_path}: {e}")
+        
+        # Try the default bakery prompt if tenant is not bakery
+        if tenant != "bakery":
+            try:
+                default_prompt_path = os.path.join(prompts_dir, "prompt-bakery.txt")
+                logging.info(f"Attempting to load default prompt from: {default_prompt_path}")
+                with open(default_prompt_path, "r", encoding="utf-8") as f:
+                    system_prompt = f.read()
+                    logging.info(f"Successfully loaded default bakery prompt for tenant '{tenant}' from {default_prompt_path}")
+                    return system_prompt
+            except Exception as e2:
+                logging.error(f"Failed to load default bakery prompt: {e2}")
+        
+        # Return a basic fallback prompt if no files can be loaded
+        fallback_prompt = f"You are a receptionist at a {tenant if tenant else 'bakery'}. Be polite and helpful."
+        logging.warning(f"Using fallback prompt for tenant '{tenant}': {fallback_prompt}")
         return fallback_prompt
 
 # Function to create Gemini configuration with tenant-specific prompt
@@ -427,25 +378,18 @@ def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int
 class GeminiSession:
     """A session with Gemini for a single WebSocket connection."""
     
-    def __init__(self, supabase_client, gemini_client, session_id, websocket, tenant="bakery"):
+    def __init__(self, session_id, websocket, tenant="bakery"):
         """Initialize a new session.
         
         Args:
-            supabase_client: The initialized Supabase client.
-            gemini_client: The initialized Gemini client.
-            session_id: A unique identifier for this session.
-            websocket: The WebSocket connection.
-            tenant: The tenant identifier (e.g., 'bakery', 'saloon').
+            session_id: A unique identifier for this session
+            websocket: The WebSocket connection
+            tenant: The tenant identifier (e.g., 'bakery', 'saloon')
         """
         self.session_id = session_id
         self.websocket = websocket
         self.tenant = tenant  # Store the initial tenant
         self.logger = logging.getLogger(f"GeminiSession-{session_id}")
-        self.shutdown_event = asyncio.Event()
-        
-        # Injected dependencies
-        self.supabase_client = supabase_client
-        self.gemini_client = gemini_client
         
         # Will be initialized later
         self.gemini_session = None
@@ -457,7 +401,6 @@ class GeminiSession:
         self.sequence_number = 0
         self.audio_chunk_counter = 0
         self.is_speaking = False
-        self._cleanup_started = False # Flag to prevent duplicate cleanup
         
         # Initialize transcript manager (will be properly set up after we get call_sid)
         self.transcript_manager = None
@@ -487,7 +430,7 @@ class GeminiSession:
         for attempt in range(max_retries):
             try:
                 # Use async with to properly handle the AsyncGeneratorContextManager
-                self.gemini_session = self.gemini_client.aio.live.connect(
+                self.gemini_session = client.aio.live.connect(
                     model="models/gemini-2.5-flash-preview-native-audio-dialog",
                     config=tenant_config
                 )
@@ -550,8 +493,6 @@ class GeminiSession:
                     
                     # Create transcript manager with call details
                     self.transcript_manager = TranscriptManager(
-                        supabase_client=self.supabase_client,
-                        gemini_client=self.gemini_client,
                         call_sid=self.call_sid,
                         session_id=self.session_id,
                         tenant=self.tenant
@@ -767,8 +708,9 @@ class GeminiSession:
         finally:
             # This block is critical. It runs when the `async for` loop exits,
             # which happens when the Exotel connection closes.
-            self.logger.info("Exotel listening loop finished. Signaling other tasks to shut down.")
-            self.shutdown_event.set()
+            self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
+            if self.gemini_session:
+                await self.gemini_session.close()
     
     async def receive_from_gemini(self):
         """Receive responses from Gemini and send to Exotel."""
@@ -784,7 +726,7 @@ class GeminiSession:
         
         try:
             # Process responses from Gemini with retry logic
-            while not self.shutdown_event.is_set():
+            while True:
                 # Check if WebSocket is still open
                 websocket_open = True
                 try:
@@ -1057,11 +999,7 @@ class GeminiSession:
             self.logger.error(f"Error in keep-alive task: {e}")
     
     def cleanup(self):
-        """Triggers the non-blocking, asynchronous cleanup process, ensuring it only runs once."""
-        if self._cleanup_started:
-            self.logger.info("Cleanup already in progress, skipping.")
-            return
-        self._cleanup_started = True
+        """Triggers the non-blocking, asynchronous cleanup process."""
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
         asyncio.create_task(self.run_post_call_processing())
 
@@ -1069,14 +1007,17 @@ class GeminiSession:
         """Runs all post-call tasks in the background without blocking."""
         self.logger.info(f"Starting background post-call processing for {self.session_id}")
 
-        # 1. Save and process the call details. This is the main post-call task.
+        # 1. Save the raw transcript first - this is critical.
         if self.transcript_manager:
-            self.logger.info("Saving and parsing call details...")
-            await self.transcript_manager.save_call_details()
+            self.logger.info("Saving transcript...")
+            self.transcript_manager.save_transcript()
 
-        # 2. Fetch Exotel details in parallel
+        # 2. Fetch Exotel details and analyze transcript in parallel
         if self.call_sid:
             await self.fetch_and_store_exotel_details()
+        
+        # (Placeholder for the next step)
+        # await self.analyze_transcript_for_booking()
 
         # 3. Final resource cleanup - check for attribute existence first
         if hasattr(self, 'audio_stream') and self.audio_stream and not self.audio_stream.is_stopped():
@@ -1130,9 +1071,9 @@ class GeminiSession:
                 }
 
                 # Insert into Supabase
-                if self.supabase_client:
+                if supabase:
                     self.logger.info(f"Inserting call details into Supabase for call_sid: {self.call_sid}")
-                    self.supabase_client.table("exotel_call_details").insert(data_to_insert).execute()
+                    supabase.table("exotel_call_details").insert(data_to_insert).execute()
                     self.logger.info("Successfully saved Exotel call details to Supabase.")
                 else:
                     self.logger.error("Supabase client not available to save Exotel details.")
@@ -1162,19 +1103,15 @@ class GeminiSession:
 class ExotelGeminiBridge:
     """Main server class that manages WebSocket connections and Gemini sessions."""
     
-    def __init__(self, supabase_client: Client, gemini_client, host: str = "0.0.0.0", port: int = 8765, base_path: str = "/"):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8765, base_path: str = "/"):
         """
         Initialize the ExotelGeminiBridge server.
         
         Args:
-            supabase_client: The initialized Supabase client.
-            gemini_client: The initialized Gemini client.
-            host: Host address to bind the server to.
-            port: Port to listen on.
-            base_path: Base WebSocket endpoint path.
+            host: Host address to bind the server to
+            port: Port to listen on
+            base_path: Base WebSocket endpoint path
         """
-        self.supabase_client = supabase_client
-        self.gemini_client = gemini_client
         self.host = host
         self.port = port
         self.base_path = base_path
@@ -1183,8 +1120,8 @@ class ExotelGeminiBridge:
         
         # Ensure call_details directory exists at startup
         try:
-            os.makedirs("call_details", exist_ok=True)
-            self.logger.info(f"Created call_details directory at {os.path.abspath('call_details')}")
+            os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
+            self.logger.info(f"Created call_details directory at {os.path.abspath(CALL_DETAILS_DIR)}")
         except Exception as e:
             self.logger.error(f"Failed to create call_details directory: {e}")
             import traceback
@@ -1195,42 +1132,80 @@ class ExotelGeminiBridge:
         
         Args:
             websocket: The WebSocket connection
-            path: The request path
-            tenant: The tenant identifier (e.g., 'bakery', 'saloon')
+            path: The WebSocket path
+            tenant: Optional explicit tenant identifier. If None, will be parsed from path.
         """
-        
-        # Use the provided tenant or extract from path
-        if tenant is None:
-            # Extract tenant from path, default to 'bakery'
-            path_parts = path.strip('/').split('/')
-            if len(path_parts) > 0 and path_parts[0]:
-                tenant = path_parts[0]
-            else:
-                tenant = 'bakery' # Default tenant
-        
-        self.logger.info(f"New connection on path: {path} for tenant: {tenant}")
-        
+        # Generate a unique session ID
         session_id = str(uuid.uuid4())
-        session = GeminiSession(
-            supabase_client=self.supabase_client,
-            gemini_client=self.gemini_client,
-            session_id=session_id,
-            websocket=websocket,
-            tenant=tenant
-        )
+        
+        # Parse the tenant from the path if not explicitly provided
+        if tenant is None:
+            tenant = self._parse_tenant_from_path(path)
+            self.logger.info(f"Parsed tenant from path: {tenant}")
+        else:
+            self.logger.info(f"Using explicitly provided tenant: {tenant}")
+        
+        self.logger.info(f"New connection: {session_id} for tenant '{tenant}'")
+        self.logger.info(f"Connection path: {path}")
+        self.logger.info(f"Final tenant used: {tenant}")
+        
+        # Create a new session with the tenant
+        session = GeminiSession(session_id, websocket, tenant)
         self.active_sessions[session_id] = session
         
         try:
+            # Run the session
             await session.run()
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.info(f"Connection closed: {session_id} - {e}")
         except Exception as e:
             self.logger.error(f"Error in session {session_id}: {e}")
-            import traceback
-            traceback.print_exc()
         finally:
-            self.logger.info(f"Session {session_id} ended")
+            # Clean up the session
             if session_id in self.active_sessions:
                 del self.active_sessions[session_id]
-            session.cleanup()
+            self.logger.info(f"Session ended: {session_id}")
+            
+    def _parse_tenant_from_path(self, path):
+        """Parse the tenant from the WebSocket path.
+        
+        Args:
+            path: The WebSocket path
+            
+        Returns:
+            The tenant identifier (e.g., 'bakery', 'saloon')
+        """
+        # Log the raw path for debugging
+        self.logger.info(f"Raw WebSocket path: '{path}'")
+        
+        # Remove leading and trailing slashes
+        clean_path = path.strip('/')
+        self.logger.info(f"Cleaned path: '{clean_path}'")
+        
+        # Split the path into segments
+        segments = clean_path.split('/')
+        self.logger.info(f"Path segments: {segments}")
+        
+        # If the path is empty or just 'media', use the default tenant
+        if not segments or segments[0] == 'media' or segments[0] == '':
+            self.logger.info(f"Using default tenant 'bakery' for path '{path}'")
+            return 'bakery'  # Default tenant
+        
+        # Handle Railway's path format which might include the full URL
+        if segments[0].startswith('http') or segments[0].startswith('ws'):
+            self.logger.info(f"Detected full URL in path: '{segments[0]}'")
+            # Extract the hostname part and look for tenant in the remaining segments
+            if len(segments) > 1:
+                tenant = segments[1]  # The tenant might be the second segment
+                self.logger.info(f"Using second segment as tenant: '{tenant}'")
+            else:
+                self.logger.info(f"No tenant found in URL path, using default 'bakery'")
+                tenant = 'bakery'
+        else:
+            # If the path is like '/bakery' or '/saloon', use that as the tenant
+            tenant = segments[0]
+            self.logger.info(f"Using first segment as tenant: '{tenant}'")
+        
         # Validate the tenant against known tenants
         known_tenants = ['bakery', 'saloon']
         if tenant not in known_tenants:
@@ -1322,64 +1297,25 @@ class ExotelGeminiBridge:
 
 # Main entry point
 async def main():
-    """Main entry point for the application."""
-    # Load environment variables from .env file
-    load_dotenv()
-
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("server.log")
-        ]
-    )
-
     # Parse command line arguments
     import argparse
+    import sys
     parser = argparse.ArgumentParser(description='Multi-tenant Exotel-Gemini Bridge server')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host address to bind to')
     parser.add_argument('--port', type=int, default=None, help='Port to listen on (overrides PORT env var)')
     parser.add_argument('--base-path', type=str, default='/', help='Base WebSocket endpoint path')
     args = parser.parse_args()
 
-    # Initialize Supabase client
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_API_KEY")
-
-    if not supabase_url or not supabase_key:
-        logging.error("Supabase URL or Key not found in environment variables.")
-        return
-
-    try:
-        supabase_client = create_client(supabase_url, supabase_key)
-        logging.info("Supabase client initialized successfully.")
-    except Exception as e:
-        logging.error(f"Failed to initialize Supabase client: {e}")
-        return
-
-    # Initialize Gemini client
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        logging.error("GEMINI_API_KEY not found in environment variables.")
-        return
-
-    # Initialize the Gemini client
-    gemini_client = genai.Client(api_key=api_key)
-    logging.info("Gemini client initialized successfully.")
+    # Check if API key is available
+    if not GEMINI_API_KEY:
+        logging.error("GEMINI_API_KEY environment variable not set. Please set it and try again.")
+        sys.exit(1)
 
     # Get port from environment variable (for Railway) or use command line argument or default
     port = args.port if args.port is not None else int(os.environ.get('PORT', DEFAULT_PORT))
 
     # Create and start the server
-    server = ExotelGeminiBridge(
-        supabase_client=supabase_client,
-        gemini_client=gemini_client,
-        host=args.host,
-        port=port,
-        base_path=args.base_path
-    )
+    server = ExotelGeminiBridge(host=args.host, port=port, base_path=args.base_path)
     await server.start_server()
 
 
