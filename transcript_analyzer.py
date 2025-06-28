@@ -90,7 +90,7 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
         # function without blocking the event loop, we use `asyncio.to_thread`.
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model_name="models/gemini-1.5-flash", # Corrected model name format
+            model_name="gemini-2.5-flash", # Corrected model name format
             contents=prompt,
             generation_config={
                 "response_mime_type": "application/json",
