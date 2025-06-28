@@ -4,6 +4,7 @@ import logging
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 from google import genai
+from google.genai import types
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
@@ -92,10 +93,10 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
             client.models.generate_content,
             model="gemini-2.5-flash", # Correct model name format
             contents=prompt,
-            generation_config={
-                "response_mime_type": "application/json",
-                "response_schema": schema,
-            },
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=schema,
+            ),
         )
         
         logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
