@@ -1,11 +1,12 @@
 import os
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
-import google.generativeai as genai
+from google import genai
 
 # Configure the Gemini API key
 # Make sure to set the GOOGLE_API_KEY environment variable
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+# This is done once, typically at the start of your application.
+# We will assume it's configured in the main new_exotel_bridge.py file.
 
 # Define the possible types for a call
 CallType = Literal["Booking", "Status Check", "Cancellation", "Informational", "Others"]
@@ -80,20 +81,19 @@ async def analyze_transcript(transcript: str, tenant: str) -> Optional[dict]:
     print(f"Analyzer: Analyzing transcript for tenant '{tenant}'...")
 
     try:
-        client = genai.GenerativeModel(model_name="gemini-1.5-flash")
-        response = await client.generate_content_async(
+        # Use the client pattern as specified by the user
+        client = genai.Client()
+        response = await client.models.generate_content_async(
+            model="gemini-1.5-flash", # Corrected model parameter name
             contents=prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=schema,
-            )
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": schema,
+            },
         )
         
-        # The API returns a pydantic model instance in the `candidates[0].content.parts[0].function_call`
-        # but the text representation is also directly available and parsed.
-        # For simplicity, we can work with the text if it's valid JSON.
-        if response.text:
-            # The response.parsed is a Pydantic model instance
+        # The response.parsed attribute directly contains the instantiated Pydantic object
+        if response.parsed:
             model_instance = response.parsed
             # Convert the Pydantic model to a dictionary for JSONB storage
             return model_instance.dict()
