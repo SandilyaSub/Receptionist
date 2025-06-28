@@ -1,0 +1,27 @@
+{
+  "name": "bakery-bot-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for connecting Exotel to OpenAI Realtime API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "websocket",
+    "exotel",
+    "openai",
+    "bakery",
+    "bot"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^4.20.1",
+    "ws": "^8.17.0",
+    "wav": "^1.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

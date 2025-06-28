@@ -17,95 +17,97 @@ import warnings
 import sys
 from datetime import datetime
 from typing import Dict, Optional
-import httpx
-from transcript_analyzer import analyze_transcript
 
-# Directory to store call transcripts
+# Directory for saving call transcripts
 CALL_DETAILS_DIR = "call_details"
 
-# Ensure the call_details directory exists
-os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-
-# TranscriptManager class for saving conversation transcripts and running analysis
+# TranscriptManager class for saving conversation transcripts
 class TranscriptManager:
-    """Manages the conversation transcript, saves it, and runs analysis."""
-    def __init__(self, session_id=None, call_sid=None, tenant=None):
-        self.session_id = session_id or str(uuid.uuid4())
-        self.call_sid = call_sid
-        self.tenant = tenant
-        self.transcript_data = {"session_id": self.session_id, "conversation": []}
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.final_model_text = ""
-        self.supabase_client = supabase
-
-    def add_to_transcript(self, role, text):
-        """Adds a message to the transcript."""
-        if text and text.strip():
-            self.transcript_data["conversation"].append({"role": role, "text": text.strip()})
-
-    def get_full_transcript(self):
-        """Returns the full transcript data."""
-        return self.transcript_data
-
-    async def save_transcript_and_analyze(self):
-        """Saves the transcript, analyzes it, and updates the record in Supabase."""
-        if not self.supabase_client:
-            self.logger.error("Supabase client not initialized. Cannot process transcript.")
-            return
-
-        if not self.transcript_data.get("conversation"):
-            self.logger.warning("No conversation to save, skipping transcript processing.")
-            return
-
-        # Add the final model text if it exists
-        if self.final_model_text:
-            self.add_to_transcript("assistant", self.final_model_text)
-            self.final_model_text = ""
-
-        record_id = None
-        try:
-            # Step 1: Insert the initial transcript data
-            data_to_insert = {
-                "session_id": self.session_id,
-                "tenant": self.tenant,
-                "transcript": self.transcript_data,
-                "call_sid": self.call_sid
-            }
-            self.logger.info(f"Attempting to insert transcript for session {self.session_id} into 'call_details'.")
-            response = self.supabase_client.table("call_details").insert(data_to_insert).execute()
+    """Manages conversation transcripts and saves them to JSON files."""
+    
+    def __init__(self, session_id=None, call_sid=None):
+        """Initialize a new transcript manager.
+        
+        Args:
+            session_id: The unique session identifier
+            call_sid: The call SID from Exotel
+        """
+        # Create the call_details directory if it doesn't exist
+        os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
+        
+        # Use call_sid if available, otherwise use session_id or timestamp
+        call_id = call_sid or session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Initialize transcript data
+        self.transcript_data = {
+            "call_id": call_id,
+            "start_time": datetime.now().isoformat(),
+            "conversation": []
+        }
+        self.current_user_text = ""
+        self.current_model_text = ""
+        self.last_speaker = None
+        
+    def add_user_transcript(self, text):
+        """Add user transcript text."""
+        if text:
+            # If we were previously getting model text and now have user text,
+            # save the model's message and start a new user message
+            if self.last_speaker == "model" and self.current_model_text:
+                self.transcript_data["conversation"].append({
+                    "role": "assistant",
+                    "content": self.current_model_text
+                })
+                self.current_model_text = ""
+                self.current_user_text = text
+            else:
+                # Append to current user transcript
+                self.current_user_text += text
+            self.last_speaker = "user"
             
-            if response.data:
-                record_id = response.data[0]['id']
-                self.logger.info(f"Successfully saved transcript to Supabase with record ID: {record_id}")
+    def add_model_transcript(self, text):
+        """Add model transcript text."""
+        if text:
+            # If we were previously getting user text and now have model text,
+            # save the user's message and start a new model message
+            if self.last_speaker == "user" and self.current_user_text:
+                self.transcript_data["conversation"].append({
+                    "role": "user",
+                    "content": self.current_user_text
+                })
+                self.current_user_text = ""
+                self.current_model_text = text
             else:
-                self.logger.error("Failed to insert transcript into Supabase, no data returned.")
-                return
-
-        except Exception as e:
-            self.logger.error(f"Error saving initial transcript to Supabase: {e}")
-            return # Stop if initial save fails
-
-        try:
-            # Step 2: Analyze the transcript
-            full_transcript_text = "\n".join([f"{turn['role']}: {turn['text']}" for turn in self.transcript_data["conversation"]])
-            analysis_result = await analyze_transcript(full_transcript_text, self.tenant)
-
-            # Step 3: Update the record with the analysis results
-            if analysis_result:
-                self.logger.info(f"Updating record {record_id} with analysis results.")
-                update_data = {
-                    "call_type": analysis_result.get("call_type"),
-                    "critical_call_details": analysis_result
-                }
-                self.supabase_client.table("call_details").update(update_data).eq("id", record_id).execute()
-                self.logger.info(f"Successfully updated call_details for id {record_id} with analysis.")
-            else:
-                self.logger.warning(f"Analysis returned no result for record {record_id}. No update performed.")
-
-        except Exception as e:
-            self.logger.error(f"An error occurred during transcript analysis or DB update: {e}")
-            import traceback
-            traceback.print_exc()
+                # Append to current model transcript
+                self.current_model_text += text
+            self.last_speaker = "model"
+    
+    def save_transcript(self):
+        """Save the transcript to a JSON file."""
+        # Add the last message if it has any content
+        if self.current_user_text:
+            self.transcript_data["conversation"].append({
+                "role": "user",
+                "content": self.current_user_text
+            })
+        if self.current_model_text:
+            self.transcript_data["conversation"].append({
+                "role": "assistant",
+                "content": self.current_model_text
+            })
+        
+        # Add end time
+        self.transcript_data["end_time"] = datetime.now().isoformat()
+        
+        # Generate filename
+        filename = f"{self.transcript_data['call_id']}.json"
+        filepath = os.path.join(CALL_DETAILS_DIR, filename)
+        
+        # Write to file
+        with open(filepath, 'w') as f:
+            json.dump(self.transcript_data, f, indent=2)
+        
+        return filepath
 
 # For Python versions before 3.11, implement compatibility classes
 if sys.version_info < (3, 11):
@@ -154,8 +156,6 @@ if sys.version_info < (3, 11):
 import websockets
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv
-from supabase import create_client, Client
 
 # Configure logging to both console and file
 log_dir = "logs"
@@ -164,50 +164,15 @@ os.makedirs(log_dir, exist_ok=True)
 # Create a file handler that logs to a new file each run
 log_file = os.path.join(log_dir, f"exotel_bridge_{int(time.time())}.log")
 
-# Configure logging
+# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
-
-# Suppress verbose warnings from the Gemini library
-logging.getLogger('google_genai').setLevel(logging.ERROR)
-
-# Load environment variables from .env file
-dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-load_dotenv(dotenv_path=dotenv_path)
-logging.info(f"Attempting to load .env file from: {dotenv_path}")
-
-# Supabase configuration
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_API_KEY")
-
-# Diagnostic logging for environment variables
-if not SUPABASE_URL:
-    logging.error("SUPABASE_URL not found. Please check your .env file.")
-else:
-    logging.info("SUPABASE_URL loaded successfully.")
-
-if not SUPABASE_KEY:
-    logging.error("SUPABASE_API_KEY not found. Please check your .env file.")
-else:
-    logging.info("SUPABASE_API_KEY loaded successfully.")
-
-# Initialize Supabase client
-try:
-    if SUPABASE_URL and SUPABASE_KEY:
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logging.info("Successfully connected to Supabase.")
-    else:
-        supabase = None
-        raise ValueError("Supabase URL or Key is missing, cannot create client.")
-except Exception as e:
-    logging.error(f"Failed to initialize Supabase client: {e}")
-    supabase = None
 
 # Create a custom filter to filter out specific log messages
 class NonTextPartsFilter(logging.Filter):
@@ -345,12 +310,8 @@ def create_gemini_config(tenant="bakery"):
     tenant_prompt = load_system_prompt(tenant)
     
     # Create and return the configuration
-    # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
-    # audio transcription requires empty dictionaries, not boolean values
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
-        input_audio_transcription={},  # Enable input transcription
-        output_audio_transcription={},  # Enable output transcription
         media_resolution="MEDIA_RESOLUTION_MEDIUM",
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
@@ -365,6 +326,9 @@ def create_gemini_config(tenant="bakery"):
             parts=[types.Part.from_text(text=tenant_prompt)],
             role="user"
         ),
+        # Enable input and output audio transcription
+        input_audio_transcription=True,
+        output_audio_transcription=True,
     )
 
 # Audio processing helper functions
@@ -512,68 +476,33 @@ class GeminiSession:
                         self.tenant = new_tenant
                 
                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
-                
-                # Initialize the transcript manager with call details
-                if self.call_sid:
-                    self.logger.info(f"Initializing transcript manager for call {self.call_sid}")
-
-                    
-                    # Create transcript manager with call details
-                    self.transcript_manager = TranscriptManager(
-                        call_sid=self.call_sid,
-                        session_id=self.session_id,
-                        tenant=self.tenant
-                    )
-                    
-                    # Ensure call_details directory exists
-                    os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-
-                else:
-                    self.logger.warning("No call_sid received, transcript will not be saved")
-
+                self.logger.info(f"Start message received with stream_sid={self.stream_sid}, initializing Gemini")
+                self.logger.info(f"Using tenant '{self.tenant}' for this session")
                 
                 # Initialize Gemini session with the tenant (possibly updated from message)
                 self.logger.info(f"Initializing Gemini session for tenant '{self.tenant}'")
                 await self.initialize()
                 
-                try:
-                    # Use async with to properly handle the Gemini session
-                    async with self.gemini_session as session:
-                        self.gemini_session = session
-                        self.logger.info("Gemini session connected")
+                # Use async with to properly handle the Gemini session
+                async with self.gemini_session as session:
+                    self.gemini_session = session
+                    self.logger.info("Gemini session connected")
+                    
+                    # Create tasks for bidirectional streaming
+                    async with asyncio.TaskGroup() as tg:
+                        # Task 1: Continue receiving audio from Exotel and send to Gemini
+                        tg.create_task(self.continue_receiving_from_exotel())
                         
-                        # Create tasks for bidirectional streaming
-                        async with asyncio.TaskGroup() as tg:
-                            # Task 1: Continue receiving audio from Exotel and send to Gemini
-                            tg.create_task(self.continue_receiving_from_exotel())
-                            
-                            # Task 2: Receive responses from Gemini and send to Exotel
-                            tg.create_task(self.receive_from_gemini())
-                            
-                            # Task 3: Send keep-alive messages to prevent Exotel from timing out
-                            tg.create_task(self.send_keep_alive_messages())
-                finally:
-                    # Always call cleanup to ensure transcript is saved
-                    try:
-                        self.logger.info(f"Triggering cleanup for session {self.session_id}")
-                        self.cleanup()
-                        self.logger.info(f"Cleanup triggered for session {self.session_id}")
-                    except Exception as cleanup_error:
-                        self.logger.error(f"Error during cleanup: {cleanup_error}")
-                        import traceback
-                        traceback.print_exc()
-            else:
-                self.logger.error(f"Expected 'start' event, got: {data.get('event')}")
+                        # Task 2: Receive responses from Gemini and send to Exotel
+                        tg.create_task(self.receive_from_gemini())
+                        
+                        # Task 3: Send keep-alive messages to prevent Exotel from timing out
+                        tg.create_task(self.send_keep_alive_messages())
+                
         except Exception as e:
             self.logger.error(f"Error in Gemini session: {e}")
             import traceback
             traceback.print_exc()
-            # Even on error, try to save the transcript
-            try:
-                self.cleanup()
-            except Exception as cleanup_error:
-                self.logger.error(f"Error during cleanup after exception: {cleanup_error}")
-                traceback.print_exc()
     
     async def wait_for_start_message(self):
         """Wait for and process the 'start' message from the client."""
@@ -606,28 +535,10 @@ class GeminiSession:
                                 self.to_number = start_data.get("to")
                                 self.custom_parameters = start_data.get("custom_parameters", {})
                                 
-                                # Initialize transcript manager for this session
-                                self.logger.info("Creating transcript manager")
-                                print(f"DEBUG: Creating transcript manager for call_sid: {self.call_sid}")
-                                self.transcript_manager = TranscriptManager(
-                                    call_sid=self.call_sid,
-                                    session_id=self.session_id,
-                                    tenant=self.tenant
-                                )
-                                self.logger.info(f"Transcript manager initialized for call_id: {self.call_sid}")
-                                print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
+                                # Initialize transcript manager with call_sid
+                                self.transcript_manager = TranscriptManager(session_id=self.session_id, call_sid=self.call_sid)
                                 
-                                # Verify call_details directory exists
-                                if os.path.exists(CALL_DETAILS_DIR):
-                                    print(f"DEBUG: Call details directory exists at {os.path.abspath(CALL_DETAILS_DIR)}")
-                                else:
-                                    print(f"DEBUG: Call details directory does not exist at {os.path.abspath(CALL_DETAILS_DIR)}")
-                                    os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-                                    print(f"DEBUG: Created call details directory at {os.path.abspath(CALL_DETAILS_DIR)}")
-                                
-                                # List files in call_details directory
-                                print(f"DEBUG: Files in call_details directory: {os.listdir(CALL_DETAILS_DIR)}")
-                                
+                                self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
                                 return True  # Successfully processed start message
                 except json.JSONDecodeError:
                     self.logger.warning("Received non-JSON message")
@@ -732,12 +643,6 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error in receive_from_exotel: {e}")
             raise
-        finally:
-            # This block is critical. It runs when the `async for` loop exits,
-            # which happens when the Exotel connection closes.
-            self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
-            if self.gemini_session:
-                await self.gemini_session.close()
     
     async def receive_from_gemini(self):
         """Receive responses from Gemini and send to Exotel."""
@@ -814,21 +719,21 @@ class GeminiSession:
                                 text = response.text
                                 self.logger.info(f"Gemini text response: {text}")
                                 if self.transcript_manager:
-                                    self.transcript_manager.add_to_transcript("assistant", text)
+                                    self.transcript_manager.add_model_transcript(text)
                                     
                             # Process input audio transcription (user speech)
                             if hasattr(response.server_content, 'input_transcription') and response.server_content.input_transcription:
                                 user_text = response.server_content.input_transcription.text
-                                # User transcript is now handled by TranscriptManager
+                                self.logger.debug(f"User transcript: {user_text}")
                                 if self.transcript_manager:
-                                    self.transcript_manager.add_to_transcript("user", user_text)
+                                    self.transcript_manager.add_user_transcript(user_text)
                                     
                             # Process output audio transcription (model speech)
                             if hasattr(response.server_content, 'output_transcription') and response.server_content.output_transcription:
                                 model_text = response.server_content.output_transcription.text
-                                # Model transcript is now handled by TranscriptManager
+                                self.logger.debug(f"Model transcript: {model_text}")
                                 if self.transcript_manager:
-                                    self.transcript_manager.add_to_transcript("assistant", model_text)
+                                    self.transcript_manager.add_model_transcript(model_text)
                             
                             # Process audio data if found
                             if audio_data:
@@ -1025,106 +930,25 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error in keep-alive task: {e}")
     
-    def cleanup(self):
-        """Triggers the non-blocking, asynchronous cleanup process."""
-        self.logger.info(f"Triggering async cleanup for session {self.session_id}")
-        asyncio.create_task(self.run_post_call_processing())
-
-    async def run_post_call_processing(self):
-        """Runs all post-call tasks in the background without blocking."""
-        self.logger.info(f"Starting background post-call processing for {self.session_id}")
-
-        # 1. Save the raw transcript first - this is critical.
+    async def cleanup(self):
+        """Clean up resources for this session."""
+        self.logger.info("Cleaning up session resources")
+        
+        # Save transcript if available
         if self.transcript_manager:
-            self.logger.info("Saving transcript...")
-            await self.transcript_manager.save_transcript_and_analyze()
-        else:
-            self.logger.warning("No transcript manager available, skipping transcript save and analysis.")
-
-        # Fetch and store Exotel call details
-        if self.call_sid:
-            await self.fetch_and_store_exotel_details()
-        else:
-            self.logger.warning("No call_sid available, skipping Exotel detail fetch.")
+            try:
+                filepath = self.transcript_manager.save_transcript()
+                self.logger.info(f"Conversation transcript saved to: {filepath}")
+            except Exception as e:
+                self.logger.error(f"Error saving transcript: {e}")
         
-        # (Placeholder for the next step)
-        # await self.analyze_transcript_for_booking()
-
-        # 3. Final resource cleanup - check for attribute existence first
-        if hasattr(self, 'audio_stream') and self.audio_stream and not self.audio_stream.is_stopped():
-            self.logger.info("Closing audio stream.")
-            self.audio_stream.close()
-            self.audio_stream = None
-
-        if hasattr(self, 'gemini_session') and self.gemini_session:
-            self.logger.info("Closing Gemini session.")
-            await self.gemini_session.close()
-            self.gemini_session = None
-
-        self.logger.info(f"Background post-call processing finished for {self.session_id}")
-
-    async def fetch_and_store_exotel_details(self):
-        """Fetches call details from Exotel and stores them in Supabase."""
-        self.logger.info(f"Fetching Exotel call details for call_sid: {self.call_sid}")
-        
-        api_key = os.environ.get("EXOTEL_API_KEY_USERNAME")
-        api_token = os.environ.get("EXOTEL_API_KEY_PASSWORD")
-        account_sid = os.environ.get("EXOTEL_ACCOUNT_SID")
-
-        if not all([api_key, api_token, account_sid]):
-            self.logger.error("Exotel API credentials or Account SID are not configured.")
-            return
-
-        url = f"https://api.exotel.com/v1/Accounts/{account_sid}/Calls/{self.call_sid}.json"
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, auth=(api_key, api_token))
-                response.raise_for_status() # Raises an exception for 4XX/5XX responses
-                
-                call_details = response.json().get("Call")
-                if not call_details:
-                    self.logger.error("Exotel API response did not contain 'Call' details.")
-                    return
-
-                # Prepare data for Supabase
-                data_to_insert = {
-                    "call_sid": call_details.get("Sid"),
-                    "from_number": call_details.get("From"),
-                    "to_number": call_details.get("To"),
-                    "status": call_details.get("Status"),
-                    "start_time": call_details.get("StartTime"),
-                    "end_time": call_details.get("EndTime"),
-                    "duration": call_details.get("Duration"),
-                    "price": call_details.get("Price"),
-                    "direction": call_details.get("Direction"),
-                    "recording_url": call_details.get("RecordingUrl")
-                }
-
-                # Insert into Supabase
-                if supabase:
-                    self.logger.info(f"Inserting call details into Supabase for call_sid: {self.call_sid}")
-                    supabase.table("exotel_call_details").insert(data_to_insert).execute()
-                    self.logger.info("Successfully saved Exotel call details to Supabase.")
-                else:
-                    self.logger.error("Supabase client not available to save Exotel details.")
-
-        except httpx.HTTPStatusError as e:
-            self.logger.error(f"HTTP error fetching Exotel details: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            self.logger.error(f"An unexpected error occurred while fetching Exotel details: {e}")
-
         # Close the Gemini session if it exists
         if self.gemini_session:
             try:
                 await self.gemini_session.close()
-                self.logger.info("Gemini session closed")
-                self.logger.debug(f"Gemini session closed for {self.session_id}")
+                self.logger.info("Gemini session closed successfully")
             except Exception as e:
                 self.logger.error(f"Error closing Gemini session: {e}")
-                self.logger.debug(f"Error closing Gemini session: {e}")
-                import traceback
-                traceback.print_exc()
         
         # Clear the reference to avoid memory leaks
         self.gemini_session = None
@@ -1148,15 +972,6 @@ class ExotelGeminiBridge:
         self.base_path = base_path
         self.active_sessions: Dict[str, GeminiSession] = {}
         self.logger = logging.getLogger("ExotelGeminiBridge")
-        
-        # Ensure call_details directory exists at startup
-        try:
-            os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-            self.logger.info(f"Created call_details directory at {os.path.abspath(CALL_DETAILS_DIR)}")
-        except Exception as e:
-            self.logger.error(f"Failed to create call_details directory: {e}")
-            import traceback
-            traceback.print_exc()
     
     async def handle_connection(self, websocket, path, tenant=None):
         """Handle a WebSocket connection.
