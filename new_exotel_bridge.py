@@ -18,8 +18,7 @@ import sys
 from datetime import datetime
 from typing import Dict, Optional
 import httpx
-# Import the SDK for structured output analysis
-from google import genai as genai_for_analysis
+
 
 # Directory to store call transcripts
 CALL_DETAILS_DIR = "call_details"
@@ -90,7 +89,7 @@ class TranscriptManager:
             # Step 2: Analyze the transcript (import locally to ensure config is loaded)
             from transcript_analyzer import analyze_transcript
             full_transcript_text = "\n".join([f"{turn['role']}: {turn['text']}" for turn in self.transcript_data["conversation"]])
-            analysis_result = await analyze_transcript(full_transcript_text, self.tenant)
+            analysis_result = await analyze_transcript(full_transcript_text, self.tenant, GEMINI_API_KEY)
 
             # Step 3: Update the record with the analysis results
             if analysis_result:
@@ -275,8 +274,7 @@ client = genai.Client(
     api_key=GEMINI_API_KEY,
 )
 
-# Configure the separate genai client for structured output
-genai_for_analysis.configure(api_key=GEMINI_API_KEY)
+# The client for analysis is now configured within the analyzer function itself.
 
 # Load system prompt from file
 def load_system_prompt(tenant="bakery"):

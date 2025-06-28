@@ -3,10 +3,7 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 from google import genai
 
-# Configure the Gemini API key
-# Make sure to set the GOOGLE_API_KEY environment variable
-# This is done once, typically at the start of your application.
-# We will assume it's configured in the main new_exotel_bridge.py file.
+# The API client is configured within the analyze_transcript function.
 
 # Define the possible types for a call
 CallType = Literal["Booking", "Status Check", "Cancellation", "Informational", "Others"]
@@ -65,7 +62,7 @@ Transcript:
 ---
 """
 
-async def analyze_transcript(transcript: str, tenant: str) -> Optional[dict]:
+async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Optional[dict]:
     """Analyzes a transcript to extract structured data using Gemini."""
     if not transcript:
         print("Analyzer: Transcript is empty, skipping analysis.")
@@ -82,7 +79,7 @@ async def analyze_transcript(transcript: str, tenant: str) -> Optional[dict]:
 
     try:
         # Use the client pattern as specified by the user
-        client = genai.Client()
+        client = genai.Client(api_key=api_key)
         response = await client.models.generate_content_async(
             model="gemini-1.5-flash", # Corrected model parameter name
             contents=prompt,
