@@ -1,7 +1,11 @@
 import os
+import logging
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 from google import genai
+
+# Get a logger instance
+logger = logging.getLogger(__name__)
 
 # The API client is configured within the analyze_transcript function.
 
@@ -65,17 +69,18 @@ Transcript:
 async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Optional[dict]:
     """Analyzes a transcript to extract structured data using Gemini."""
     if not transcript:
-        print("Analyzer: Transcript is empty, skipping analysis.")
+        logger.warning("Analyzer: Transcript is empty, skipping analysis.")
         return None
 
     schema = TENANT_SCHEMAS.get(tenant)
     if not schema:
-        print(f"Analyzer: No schema found for tenant '{tenant}', skipping analysis.")
+        logger.error(f"Analyzer: No schema found for tenant '{tenant}', skipping analysis.")
         return None
 
     prompt = load_analyzer_prompt(tenant, transcript)
     
-    print(f"Analyzer: Analyzing transcript for tenant '{tenant}'...")
+    logger.info(f"Analyzer: Analyzing transcript for tenant '{tenant}' using schema {schema.__name__}.")
+    logger.debug(f"Analyzer: Prompt sent to Gemini: {prompt[:500]}...")
 
     try:
         # Use the client pattern as specified by the user
@@ -89,15 +94,18 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
             },
         )
         
+        logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
+
         # The response.parsed attribute directly contains the instantiated Pydantic object
         if response.parsed:
             model_instance = response.parsed
+            logger.info(f"Analyzer: Successfully parsed response. Call type: {model_instance.call_type}")
             # Convert the Pydantic model to a dictionary for JSONB storage
             return model_instance.dict()
         else:
-            print("Analyzer: Received an empty response from Gemini.")
+            logger.warning("Analyzer: Gemini response was not parsable into the schema. `response.parsed` is empty.")
             return None
 
     except Exception as e:
-        print(f"Analyzer: An error occurred during transcript analysis: {e}")
+        logger.error(f"Analyzer: An error occurred during transcript analysis: {e}", exc_info=True)
         return None
