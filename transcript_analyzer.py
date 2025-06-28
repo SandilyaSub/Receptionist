@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
@@ -85,10 +86,13 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
     try:
         # Use the client pattern as specified by the user
         client = genai.Client(api_key=api_key)
-        response = await client.models.generate_content_async(
-            model="gemini-1.5-flash", # Corrected model parameter name
+        # The `generate_content` method is synchronous. To call it from our async
+        # function without blocking the event loop, we use `asyncio.to_thread`.
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model_name="models/gemini-1.5-flash", # Corrected model name format
             contents=prompt,
-            config={
+            generation_config={
                 "response_mime_type": "application/json",
                 "response_schema": schema,
             },
