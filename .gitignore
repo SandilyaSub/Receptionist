@@ -1,17 +1,49 @@
 
+# Node.js / JavaScript
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.env.*
+
+# Logs and data
 *.log
+call_details/
+client_debug_audio/
+
+# OS-specific
 .DS_Store
+
+# IDEs
 .vscode/
 .idea/
 
-# Keep local-only test files
-Gemini_Live.py
+# Backup & Temporary Files
+*.bak
+*.swp
+server.js.old
+Working_files_for_backup/
+
+# Local test scripts & one-off files
+local_test_client.py
+wss_exotel_test_client.py
+test_transcript_manager.py
+exotel_simulator_client.py
+test_exotel_client.py
+test_microphone_client.py
+test_audio_client.js
+test_client.js
+test_conversation.js
+cookbook_test.py
+inspect_gemini_api.py
+

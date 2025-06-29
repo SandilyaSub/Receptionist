@@ -1,23 +1,56 @@
-"""
-## Documentation
-Quickstart: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.py
+# -*- coding: utf-8 -*-
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+"""
 ## Setup
 
 To install the dependencies for this script, run:
 
-```
+``` 
 pip install google-genai opencv-python pyaudio pillow mss
+```
+
+Before running this script, ensure the `GOOGLE_API_KEY` environment
+variable is set to the api-key you obtained from Google AI Studio.
+
+Important: **Use headphones**. This script uses the system default audio
+input and output, which often won't include echo cancellation. So to prevent
+the model from interrupting itself it is important that you use headphones. 
+
+## Run
+
+To run the script:
+
+```
+python Get_started_LiveAPI.py
+```
+
+The script takes a video-mode flag `--mode`, this can be "camera", "screen", or "none".
+The default is "camera". To share your screen run:
+
+```
+python Get_started_LiveAPI.py --mode screen
 ```
 """
 
-import os
 import asyncio
 import base64
 import io
+import os
+import sys
 import traceback
-import json
-from datetime import datetime
 
 import cv2
 import pyaudio
@@ -27,9 +60,12 @@ import mss
 import argparse
 
 from google import genai
-from google.genai import types
 
-GEMINI_API_KEY = "AIzaSyDmnCmel5kqMzi7ShnbNiYrcUxzA_kaDkM"
+if sys.version_info < (3, 11, 0):
+    import taskgroup, exceptiongroup
+
+    asyncio.TaskGroup = taskgroup.TaskGroup
+    asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -37,117 +73,15 @@ SEND_SAMPLE_RATE = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE = 1024
 
+GOOGLE_API_KEY = "AIzaSyDmnCmel5kqMzi7ShnbNiYrcUxzA_kaDkM"
+
 MODEL = "models/gemini-2.5-flash-preview-native-audio-dialog"
 
 DEFAULT_MODE = "camera"
 
-# Directory to store call transcripts
-CALL_DETAILS_DIR = "call_details"
+client = genai.Client(api_key=GOOGLE_API_KEY, http_options={"api_version": "v1beta"})
 
-class TranscriptManager:
-    """Manages conversation transcripts and saves them to JSON files."""
-    
-    def __init__(self):
-        """Initialize a new transcript manager."""
-        # Create the call_details directory if it doesn't exist
-        os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-        
-        # Initialize transcript data
-        self.transcript_data = {
-            "call_id": datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "start_time": datetime.now().isoformat(),
-            "conversation": []
-        }
-        self.current_user_text = ""
-        self.current_model_text = ""
-        self.last_speaker = None
-        
-    def add_user_transcript(self, text):
-        """Add user transcript text."""
-        if text:
-            # If we were previously getting model text and now have user text,
-            # save the model's message and start a new user message
-            if self.last_speaker == "model" and self.current_model_text:
-                self.transcript_data["conversation"].append({
-                    "role": "assistant",
-                    "content": self.current_model_text
-                })
-                self.current_model_text = ""
-                self.current_user_text = text
-            else:
-                # Append to current user transcript
-                self.current_user_text += text
-            self.last_speaker = "user"
-            
-    def add_model_transcript(self, text):
-        """Add model transcript text."""
-        if text:
-            # If we were previously getting user text and now have model text,
-            # save the user's message and start a new model message
-            if self.last_speaker == "user" and self.current_user_text:
-                self.transcript_data["conversation"].append({
-                    "role": "user",
-                    "content": self.current_user_text
-                })
-                self.current_user_text = ""
-                self.current_model_text = text
-            else:
-                # Append to current model transcript
-                self.current_model_text += text
-            self.last_speaker = "model"
-    
-    def save_transcript(self):
-        """Save the transcript to a JSON file."""
-        # Add the last message if it has any content
-        if self.current_user_text:
-            self.transcript_data["conversation"].append({
-                "role": "user",
-                "content": self.current_user_text
-            })
-        if self.current_model_text:
-            self.transcript_data["conversation"].append({
-                "role": "assistant",
-                "content": self.current_model_text
-            })
-        
-        # Add end time
-        self.transcript_data["end_time"] = datetime.now().isoformat()
-        
-        # Generate filename
-        filename = f"{self.transcript_data['call_id']}.json"
-        filepath = os.path.join(CALL_DETAILS_DIR, filename)
-        
-        # Write to file
-        with open(filepath, 'w') as f:
-            json.dump(self.transcript_data, f, indent=2)
-        
-        # Remove terminal logging
-        return filepath
-
-client = genai.Client(
-    http_options={"api_version": "v1beta"},
-    api_key=GEMINI_API_KEY,
-)
-
-
-CONFIG = types.LiveConnectConfig(
-    response_modalities=[
-        "AUDIO",
-    ],
-    input_audio_transcription={},
-    output_audio_transcription={},
-    media_resolution="MEDIA_RESOLUTION_MEDIUM",
-    speech_config=types.SpeechConfig(
-        voice_config=types.VoiceConfig(
-            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
-        )
-    ),
-    context_window_compression=types.ContextWindowCompressionConfig(
-        trigger_tokens=25600,
-        sliding_window=types.SlidingWindow(target_tokens=12800),
-    ),
-    system_instruction=types.Content(
-        parts=[types.Part.from_text(text="""You are working as a receptionist at this bakery taking user orders. 
+SYSTEM_INSTRUCTIONS = """You are working as a receptionist at this bakery taking user orders. 
 Be courteous and respond properly. Do this in an Indian accent.
 
 Towards the start of the conversation , ask the customer for his name , so that you can use that to address him during the conversation.
@@ -277,19 +211,19 @@ By the Box:
 Cakes
 (All cakes available in Half Kg / 1 Kg sizes)
 
-Cake Name	Half Kg	1 Kg
-(v) Dutch Truffle	RS 700	RS 1100
-(v) Fruit Premium	RS 700	RS 1100
-(v) Pineapple	RS 600	RS 900
-(v) Dark Forest	RS 650	RS 950
-(v) Butterscotch	RS 650	RS 950
-(v) German Chocolate Cake	RS 700	RS 1100
-(v) Ferroro Rocher Cake	RS 800	RS 1300
-(v) Irish Coffee	RS 650	RS 950
-Carrotcake	RS 650	RS 950
-Blueberry Cheesecake (Cold Set)	RS 800	RS 1300
-Tiramisu	RS 800	RS 1300
-New York Cheesecake	RS 800	RS 1300
+Cake Name\tHalf Kg\t1 Kg
+(v) Dutch Truffle\tRS 700\tRS 1100
+(v) Fruit Premium\tRS 700\tRS 1100
+(v) Pineapple\tRS 600\tRS 900
+(v) Dark Forest\tRS 650\tRS 950
+(v) Butterscotch\tRS 650\tRS 950
+(v) German Chocolate Cake\tRS 700\tRS 1100
+(v) Ferroro Rocher Cake\tRS 800\tRS 1300
+(v) Irish Coffee\tRS 650\tRS 950
+Carrotcake\tRS 650\tRS 950
+Blueberry Cheesecake (Cold Set)\tRS 800\tRS 1300
+Tiramisu\tRS 800\tRS 1300
+New York Cheesecake\tRS 800\tRS 1300
 Choice of Topping (for Cheesecakes):
 
 Plain – 0
@@ -310,23 +244,34 @@ GST: 5% Extra
 
 Cakes marked with (v) can be made eggless with an additional charge of RS 30 for 500 grams and RS 60 for 1 kg.
 
-Products marked as eggless are also free from gelatin.""")],
-        role="user"
-    ),
-)
+Products marked as eggless are also free from gelatin.
+"""
+
+CONFIG = {
+    "system_instruction": {
+                "parts": [{"text": SYSTEM_INSTRUCTIONS}]
+    },
+    "response_modalities": ["AUDIO"],
+    "speech_config": genai.types.SpeechConfig(
+        voice_config=genai.types.VoiceConfig(
+            prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(voice_name="Zephyr")
+        )
+    )
+}
 
 pya = pyaudio.PyAudio()
 
 
-class GeminiLive:
-    def __init__(self, mode=DEFAULT_MODE):
-        self.mode = mode
-        self.video_mode = mode  # Add video_mode attribute for backward compatibility
-        self.audio_stream = None
-        self.session = None
-        self.out_queue = None
+class AudioLoop:
+    def __init__(self, video_mode=DEFAULT_MODE):
+        self.video_mode = video_mode
+
         self.audio_in_queue = None
-        self.transcript_manager = TranscriptManager()
+        self.out_queue = None
+
+        self.session = None
+
+        self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
 
@@ -338,7 +283,7 @@ class GeminiLive:
             )
             if text.lower() == "q":
                 break
-            await self.session.send_client_content(turns={"parts": [{"text": text or "."}]}, turn_complete=True)
+            await self.session.send(input=text or ".", end_of_turn=True)
 
     def _get_frame(self, cap):
         # Read the frameq
@@ -411,15 +356,7 @@ class GeminiLive:
     async def send_realtime(self):
         while True:
             msg = await self.out_queue.get()
-            # Use 'audio' parameter instead of 'input' for audio data
-            if isinstance(msg, dict) and 'mime_type' in msg and 'audio' in msg['mime_type']:
-                await self.session.send_realtime_input(audio=types.Blob(
-                    data=msg['data'],
-                    mime_type=msg['mime_type']
-                ))
-            else:
-                # For other types of data, determine the appropriate parameter
-                await self.session.send_realtime_input(media=msg)
+            await self.session.send(input=msg)
 
     async def listen_audio(self):
         mic_info = pya.get_default_input_device_info()
@@ -450,18 +387,6 @@ class GeminiLive:
                     continue
                 if text := response.text:
                     print(text, end="")
-                # Process input audio transcription (user speech)
-                if hasattr(response.server_content, 'input_transcription') and response.server_content.input_transcription:
-                    user_text = response.server_content.input_transcription.text
-                    # Remove terminal logging, only save to transcript
-                    if self.transcript_manager:
-                        self.transcript_manager.add_user_transcript(user_text)
-                # Process output audio transcription (model speech)
-                if hasattr(response.server_content, 'output_transcription') and response.server_content.output_transcription:
-                    model_text = response.server_content.output_transcription.text
-                    # Remove terminal logging, only save to transcript
-                    if self.transcript_manager:
-                        self.transcript_manager.add_model_transcript(model_text)
 
             # If you interrupt the model, it sends a turn_complete.
             # For interruptions to work, we need to stop playback.
@@ -485,7 +410,7 @@ class GeminiLive:
     async def run(self):
         try:
             async with (
-                client.aio.live.connect(model=MODEL, config=CONFIG) as session,
+                                                client.aio.live.connect(model=MODEL, config=CONFIG) as session,
                 asyncio.TaskGroup() as tg,
             ):
                 self.session = session
@@ -508,18 +433,10 @@ class GeminiLive:
                 raise asyncio.CancelledError("User requested exit")
 
         except asyncio.CancelledError:
-            # Save transcript when user exits
-            if hasattr(self, 'transcript_manager'):
-                self.transcript_manager.save_transcript()
             pass
         except ExceptionGroup as EG:
-            # Only close audio_stream if it exists
-            if hasattr(self, 'audio_stream') and self.audio_stream is not None:
-                self.audio_stream.close()
+            self.audio_stream.close()
             traceback.print_exception(EG)
-            # Save transcript on error
-            if hasattr(self, 'transcript_manager'):
-                self.transcript_manager.save_transcript()
 
 
 if __name__ == "__main__":
@@ -532,5 +449,5 @@ if __name__ == "__main__":
         choices=["camera", "screen", "none"],
     )
     args = parser.parse_args()
-    main = GeminiLive(mode=args.mode)
+    main = AudioLoop(video_mode=args.mode)
     asyncio.run(main.run())
