@@ -306,7 +306,7 @@ def load_system_prompt(tenant="bakery"):
         prompt_files = []
     
     # Construct the prompt file path based on tenant
-    prompt_path = os.path.join(prompts_dir, f"prompt-{tenant}.txt")
+    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', tenant, 'prompts', 'assistant.txt')
     logging.info(f"Attempting to load prompt from: {prompt_path}")
     
     try:

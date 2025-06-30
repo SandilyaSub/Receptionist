@@ -54,7 +54,7 @@ TENANT_SCHEMAS = {
 def load_analyzer_prompt(tenant: str, transcript: str) -> str:
     """Loads the analyzer prompt for a given tenant and injects the transcript."""
     try:
-        prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', f'prompt-{tenant}-analyzer.txt')
+        prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', tenant, 'prompts', 'analyzer.txt')
         with open(prompt_path, 'r') as f:
             prompt_template = f.read()
         return prompt_template.format(transcript=transcript)
