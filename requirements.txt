@@ -6,7 +6,6 @@ websockets>=11.0.3
 # Google Gemini
 google-genai
 jsonschema
-supabase-async
 
 # Database
 supabase>=2.0.0
