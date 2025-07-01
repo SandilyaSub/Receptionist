@@ -4,27 +4,35 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
-from google import genai
+import google.generativeai as genai
 from jsonschema import validate, ValidationError
-from supabase import create_client, AsyncClient
+from supabase import create_client, Client
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
 
 # --- Supabase Helper ---
-async def get_supabase_client() -> Optional[AsyncClient]:
-    """Initializes and returns an async Supabase client."""
+def get_supabase_client() -> Optional[Client]:
+    """Initializes and returns a sync Supabase client."""
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_API_KEY")
     if not url or not key:
         logger.error("Supabase URL or API key not found in environment variables.")
         return None
-    return await create_client(url, key)
+    return create_client(url, key)
 
-async def fetch_analyzer_schema(tenant_id: str, supabase: AsyncClient) -> Optional[Dict[str, Any]]:
+async def fetch_analyzer_schema(tenant_id: str, supabase: Client) -> Optional[Dict[str, Any]]:
     """Fetches the analyzer JSON schema for a given tenant from Supabase."""
     try:
-        response = await supabase.table("tenant_configs").select("analyzer_schema").eq("tenant_id", tenant_id).eq("is_active", True).single().execute()
+        # Run the synchronous Supabase call in a separate thread
+        response = await asyncio.to_thread(
+            supabase.table("tenant_configs")
+            .select("analyzer_schema")
+            .eq("tenant_id", tenant_id)
+            .eq("is_active", True)
+            .single()
+            .execute
+        )
         if response.data and "analyzer_schema" in response.data:
             logger.info(f"Successfully fetched analyzer schema for tenant '{tenant_id}'.")
             return response.data["analyzer_schema"]
@@ -43,7 +51,6 @@ def load_analyzer_prompt(tenant: str, transcript: str, schema: Dict[str, Any]) -
         with open(prompt_path, 'r') as f:
             prompt_template = f.read()
         
-        # Inject both the schema and the transcript into the prompt
         schema_as_string = json.dumps(schema, indent=2)
         return prompt_template.format(transcript=transcript, schema=schema_as_string)
     except FileNotFoundError:
@@ -70,7 +77,7 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
         logger.warning("Analyzer: Transcript is empty, skipping analysis.")
         return None
 
-    supabase = await get_supabase_client()
+    supabase = get_supabase_client()
     if not supabase:
         return None
 
@@ -85,15 +92,20 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
     logger.debug(f"Analyzer: Prompt sent to Gemini: {prompt[:500]}...")
 
     try:
-        client = genai.Client(api_key=api_key)
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
         # The `generate_content` method is synchronous. To call it from our async
         # function without blocking the event loop, we use `asyncio.to_thread`.
         response = await asyncio.to_thread(
-            client.generate_content,
+            model.generate_content,
             prompt,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
         )
         
+        # The response text is a JSON string, so we need to parse it.
         extracted_data = json.loads(response.text)
         
         # Validate the extracted data against the schema
