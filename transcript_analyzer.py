@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 from google import genai
 from jsonschema import validate, ValidationError
-from supabase_async import create_client, AsyncClient
+from supabase import create_client, AsyncClient
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
