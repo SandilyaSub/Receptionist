@@ -4,7 +4,9 @@ uvicorn
 websockets>=11.0.3
 
 # Google Gemini
-google-genai
+google-generativeai==0.5.4
+jsonschema
+supabase-py-async
 
 # Database
 supabase>=2.0.0

@@ -1,66 +1,61 @@
 import os
 import asyncio
 import logging
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+import json
+from typing import Optional, Dict, Any
+
 from google import genai
-from google.genai import types
+from jsonschema import validate, ValidationError
+from supabase_py_async import create_client, AsyncClient
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
 
-# The API client is configured within the analyze_transcript function.
+# --- Supabase Helper ---
+async def get_supabase_client() -> Optional[AsyncClient]:
+    """Initializes and returns an async Supabase client."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_API_KEY")
+    if not url or not key:
+        logger.error("Supabase URL or API key not found in environment variables.")
+        return None
+    return await create_client(url, key)
 
-# Define the possible types for a call
-CallType = Literal["Booking", "Status Check", "Cancellation", "Informational", "Others"]
+async def fetch_analyzer_schema(tenant_id: str, supabase: AsyncClient) -> Optional[Dict[str, Any]]:
+    """Fetches the analyzer JSON schema for a given tenant from Supabase."""
+    try:
+        response = await supabase.table("tenant_configs").select("analyzer_schema").eq("tenant_id", tenant_id).eq("is_active", True).single().execute()
+        if response.data and "analyzer_schema" in response.data:
+            logger.info(f"Successfully fetched analyzer schema for tenant '{tenant_id}'.")
+            return response.data["analyzer_schema"]
+        else:
+            logger.error(f"No active analyzer schema found for tenant '{tenant_id}'.")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching schema for tenant '{tenant_id}' from Supabase: {e}")
+        return None
 
-class BakeryCallDetails(BaseModel):
-    """Structured details for a bakery call."""
-    call_type: CallType = Field(description="The primary purpose of the call.")
-    booking_confirmed: Optional[bool] = Field(description="Was a booking explicitly confirmed?", default=None)
-    customer_name: Optional[str] = Field(description="The name of the customer.", default=None)
-    phone_number: Optional[str] = Field(description="The customer's phone number.", default=None)
-    weight_of_cake: Optional[str] = Field(description="The weight of the cake (e.g., '1kg', '500g').", default=None)
-    egg_or_eggless: Optional[Literal["Egg", "Eggless"]] = Field(description="Whether the cake should have eggs or be eggless.", default=None)
-    flavour_name: Optional[str] = Field(description="The flavor of the cake.", default=None)
-    shape_of_the_cake: Optional[str] = Field(description="The shape of the cake.", default=None)
-    message_on_cake: Optional[str] = Field(description="A message to be written on the cake.", default=None)
-    custom_additions: Optional[str] = Field(description="Any other custom additions or special requests.", default=None)
-    pickup_time: Optional[str] = Field(description="The requested time for pickup.", default=None)
-    price: Optional[float] = Field(description="The price of the items discussed.", default=None)
-    gst: Optional[float] = Field(description="The Goods and Services Tax amount.", default=None)
-    total_price: Optional[float] = Field(description="The total price including all taxes.", default=None)
-
-class SaloonCallDetails(BaseModel):
-    """Structured details for a saloon call."""
-    call_type: CallType = Field(description="The primary purpose of the call.")
-    booking_confirmed: Optional[bool] = Field(description="Was a booking explicitly confirmed?", default=None)
-    customer_name: Optional[str] = Field(description="The name of the customer.", default=None)
-    phone_number: Optional[str] = Field(description="The customer's phone number.", default=None)
-    stylist_name: Optional[str] = Field(description="The name of the requested stylist.", default=None)
-    service_name: Optional[str] = Field(description="The name of the service requested (e.g., 'haircut', 'manicure').", default=None)
-    booking_time_slot: Optional[str] = Field(description="The requested time slot for the booking.", default=None)
-    customizations: Optional[str] = Field(description="Any other customizations or special requests.", default=None)
-    price: Optional[float] = Field(description="The price of the service.", default=None)
-    gst: Optional[float] = Field(description="The Goods and Services Tax amount.", default=None)
-    total_price: Optional[float] = Field(description="The total price including all taxes.", default=None)
-
-# A dictionary to map tenants to their respective Pydantic models
-TENANT_SCHEMAS = {
-    "bakery": BakeryCallDetails,
-    "saloon": SaloonCallDetails,
-}
-
-def load_analyzer_prompt(tenant: str, transcript: str) -> str:
-    """Loads the analyzer prompt for a given tenant and injects the transcript."""
+# --- Prompt Loader ---
+def load_analyzer_prompt(tenant: str, transcript: str, schema: Dict[str, Any]) -> str:
+    """Loads the analyzer prompt and injects the transcript and schema."""
     try:
         prompt_path = os.path.join(os.path.dirname(__file__), 'tenant_repository', tenant, 'prompts', 'analyzer.txt')
         with open(prompt_path, 'r') as f:
             prompt_template = f.read()
-        return prompt_template.format(transcript=transcript)
+        
+        # Inject both the schema and the transcript into the prompt
+        schema_as_string = json.dumps(schema, indent=2)
+        return prompt_template.format(transcript=transcript, schema=schema_as_string)
     except FileNotFoundError:
-        # Fallback to a generic prompt if a tenant-specific one isn't found
-        return f"""Analyze the following transcript and extract key details. Classify the call's purpose and extract any relevant information mentioned.
+        logger.error(f"Analyzer prompt file not found for tenant '{tenant}'.")
+        # Generic fallback if the file is missing
+        schema_as_string = json.dumps(schema, indent=2)
+        return f"""Analyze the following transcript and extract key details as a JSON object.
+
+Schema:
+---
+{schema_as_string}
+---
 
 Transcript:
 ---
@@ -68,36 +63,54 @@ Transcript:
 ---
 """
 
-async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Optional[dict]:
-    """Analyzes a transcript to extract structured data using Gemini."""
+# --- Main Analyzer Function ---
+async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Optional[Dict[str, Any]]:
+    """Analyzes a transcript to extract structured data using a dynamically fetched schema."""
     if not transcript:
         logger.warning("Analyzer: Transcript is empty, skipping analysis.")
         return None
 
-    schema = TENANT_SCHEMAS.get(tenant)
-    if not schema:
-        logger.error(f"Analyzer: No schema found for tenant '{tenant}', skipping analysis.")
+    supabase = await get_supabase_client()
+    if not supabase:
         return None
 
-    prompt = load_analyzer_prompt(tenant, transcript)
+    schema = await fetch_analyzer_schema(tenant, supabase)
+    if not schema:
+        # Error is logged in the fetch function
+        return None
+
+    prompt = load_analyzer_prompt(tenant, transcript, schema)
     
-    logger.info(f"Analyzer: Analyzing transcript for tenant '{tenant}' using schema {schema.__name__}.")
+    logger.info(f"Analyzer: Analyzing transcript for tenant '{tenant}'.")
     logger.debug(f"Analyzer: Prompt sent to Gemini: {prompt[:500]}...")
 
     try:
-        # Use the client pattern as specified by the user
         client = genai.Client(api_key=api_key)
         # The `generate_content` method is synchronous. To call it from our async
         # function without blocking the event loop, we use `asyncio.to_thread`.
         response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash", # Correct model name format
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=schema,
-            ),
+            client.generate_content,
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
+        
+        extracted_data = json.loads(response.text)
+        
+        # Validate the extracted data against the schema
+        validate(instance=extracted_data, schema=schema)
+        
+        logger.info(f"Successfully analyzed and validated transcript for tenant '{tenant}'.")
+        return extracted_data
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Analyzer: Failed to decode JSON from Gemini response. Error: {e}. Response text: {response.text}")
+        return None
+    except ValidationError as e:
+        logger.error(f"Analyzer: Gemini response failed schema validation for tenant '{tenant}'. Error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Analyzer: An unexpected error occurred during transcript analysis: {e}")
+        return None
         
         logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
 
