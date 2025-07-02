@@ -4,7 +4,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
-import google.generativeai as genai
+from google import genai
 from jsonschema import validate, ValidationError
 from supabase import create_client, Client
 
@@ -92,17 +92,13 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
     logger.debug(f"Analyzer: Prompt sent to Gemini: {prompt[:500]}...")
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
+        client = genai.Client(api_key=api_key)
         # The `generate_content` method is synchronous. To call it from our async
         # function without blocking the event loop, we use `asyncio.to_thread`.
         response = await asyncio.to_thread(
-            model.generate_content,
+            client.generate_content,
             prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
+            generation_config={"response_mime_type": "application/json"}
         )
         
         # The response text is a JSON string, so we need to parse it.
