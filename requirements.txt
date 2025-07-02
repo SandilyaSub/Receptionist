@@ -12,7 +12,6 @@ supabase>=2.0.0
 
 # Utilities
 python-dotenv
-webrtcvad-wheels
 
 # Python version compatibility
 taskgroup
