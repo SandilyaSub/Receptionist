@@ -5,6 +5,7 @@ import json
 from typing import Optional, Dict, Any
 
 from google import genai
+from google.genai import types
 from jsonschema import validate, ValidationError
 from supabase import create_client, Client
 
@@ -96,10 +97,15 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
         # The `generate_content` method is synchronous. To call it from our async
         # function without blocking the event loop, we use `asyncio.to_thread`.
         response = await asyncio.to_thread(
-            client.generate_content,
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
+            client.models.generate_content,
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
         )
+        
+        logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
         
         # The response text is a JSON string, so we need to parse it.
         extracted_data = json.loads(response.text)
@@ -119,19 +125,4 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
     except Exception as e:
         logger.error(f"Analyzer: An unexpected error occurred during transcript analysis: {e}")
         return None
-        
-        logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
-
-        # The response.parsed attribute directly contains the instantiated Pydantic object
-        if response.parsed:
-            model_instance = response.parsed
-            logger.info(f"Analyzer: Successfully parsed response. Call type: {model_instance.call_type}")
-            # Convert the Pydantic model to a dictionary for JSONB storage
-            return model_instance.dict()
-        else:
-            logger.warning("Analyzer: Gemini response was not parsable into the schema. `response.parsed` is empty.")
-            return None
-
-    except Exception as e:
-        logger.error(f"Analyzer: An error occurred during transcript analysis: {e}", exc_info=True)
         return None
