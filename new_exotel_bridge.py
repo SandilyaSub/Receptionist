@@ -18,6 +18,7 @@ import sys
 from datetime import datetime
 from typing import Dict, Optional
 import httpx
+import webrtcvad
 
 
 # Directory to store call transcripts
@@ -444,6 +445,15 @@ class GeminiSession:
         # Will be detected from first audio chunk
         self.gemini_output_sample_rate = None
         self.gemini_output_channels = None
+
+        # VAD (Voice Activity Detection) setup
+        self.vad = webrtcvad.Vad(2)  # Aggressiveness mode 2 (1=least, 3=most)
+        self.vad_frame_duration_ms = 30  # VAD supports 10, 20, or 30 ms frames
+        self.vad_frame_size = int(GEMINI_SAMPLE_RATE * (self.vad_frame_duration_ms / 1000.0) * 2) # 2 bytes/sample for 16-bit audio
+        self.vad_audio_buffer = bytearray()
+        self.user_is_speaking = False
+        self.vad_silence_timeout = 0.8  # 800ms of silence to mark end of speech
+        self.vad_last_speech_time = 0
     
     async def initialize(self):
         """Initialize the Gemini session with retry logic."""
@@ -674,59 +684,64 @@ class GeminiSession:
         await self.continue_receiving_from_exotel()
     
     async def continue_receiving_from_exotel(self):
-        """Continue receiving audio from Exotel after the start message has been processed."""
-        self.logger.info("Continuing to receive audio from Exotel")
-        
+        """Continue receiving audio from Exotel, apply VAD, and send to Gemini."""
+        self.logger.info("Continuing to receive audio from Exotel with VAD")
+
         try:
             async for message in self.websocket:
                 try:
                     data = json.loads(message)
-                    self.logger.debug(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
-                    
-                    if "event" in data:
-                        if data["event"] == "connected":
-                            self.logger.info("Connected message received")
-                            
-                        elif data["event"] == "media":
-                            # Process incoming audio data
-                            if "media" in data and "payload" in data["media"]:
-                                # Decode base64 audio data
-                                audio_data = base64.b64decode(data["media"]["payload"])
-                                sample_rate = data["media"].get("rate", 8000)  # Default to 8kHz if not specified
+                    event = data.get("event")
+
+                    if event == "media" and "media" in data and "payload" in data["media"]:
+                        audio_data = base64.b64decode(data["media"]["payload"])
+                        sample_rate = data["media"].get("rate", EXOTEL_SAMPLE_RATE)
+
+                        if sample_rate != GEMINI_SAMPLE_RATE:
+                            audio_data = resample_audio(audio_data, sample_rate, GEMINI_SAMPLE_RATE)
+
+                        self.vad_audio_buffer.extend(audio_data)
+
+                        # Process audio in VAD-compatible frames
+                        while len(self.vad_audio_buffer) >= self.vad_frame_size:
+                            frame = self.vad_audio_buffer[:self.vad_frame_size]
+                            self.vad_audio_buffer = self.vad_audio_buffer[self.vad_frame_size:]
+
+                            if not self.gemini_session:
+                                continue
+
+                            is_speech = self.vad.is_speech(frame, GEMINI_SAMPLE_RATE)
+
+                            if is_speech:
+                                if not self.user_is_speaking:
+                                    self.logger.info("VAD: Speech started")
+                                    self.user_is_speaking = True
                                 
-                                # Resample audio to 24kHz for Gemini if needed
-                                if sample_rate != GEMINI_SAMPLE_RATE:
-                                    self.logger.debug(f"Resampling audio from {sample_rate}Hz to {GEMINI_SAMPLE_RATE}Hz")
-                                    audio_data = resample_audio(audio_data, sample_rate, GEMINI_SAMPLE_RATE)
-                                
-                                # Send audio data to Gemini
-                                if self.gemini_session:
-                                    await self.gemini_session.send_realtime_input(audio=types.Blob(
-                                        data=audio_data,
-                                        mime_type="audio/pcm"
-                                    ))
-                                    self.logger.debug(f"Sent {len(audio_data)} bytes of audio to Gemini")
-                                else:
-                                    self.logger.warning("Cannot send audio to Gemini: session not initialized")
-                            
-                        elif data["event"] == "stop":
-                            self.logger.info("Stop message received")
-                            # Close the Gemini session gracefully
-                            if self.gemini_session:
-                                # For end-of-stream, we don't send any more audio
-                                # The session will be closed in the cleanup method
-                                self.logger.info("Received stop message, will close Gemini session")
-                            break  # Exit the loop
-                            
-                        elif data["event"] == "mark":
-                            self.logger.info(f"Mark message received: {data.get('mark', {})}")
-                            # No specific action needed for mark event
-                            
-                        elif data["event"] == "clear":
-                            self.logger.info("Clear message received")
-                            # Clear our audio buffer
-                            self.audio_buffer.clear()
-                            self.last_buffer_send_time = time.time()
+                                self.vad_last_speech_time = time.time()
+                                await self.gemini_session.send_realtime_input(
+                                    audio=types.Blob(data=frame, mime_type=f"audio/pcm;rate={GEMINI_SAMPLE_RATE}")
+                                )
+                            elif self.user_is_speaking:
+                                if time.time() - self.vad_last_speech_time > self.vad_silence_timeout:
+                                    self.logger.info("VAD: Silence timeout reached. Ending user's turn.")
+                                    await self.gemini_session.send_realtime_input(audio_stream_end=True)
+                                    self.user_is_speaking = False
+
+                    elif event == "stop":
+                        self.logger.info("Stop message received. Closing session.")
+                        return # Exit the loop and allow cleanup
+
+                    elif event == "disconnect":
+                        self.logger.info("Disconnect message received. Closing session.")
+                        return # Exit the loop and allow cleanup
+
+                    elif event == "mark":
+                        self.logger.info(f"Mark message received: {data.get('mark', {})}")
+
+                    elif event == "clear":
+                        self.logger.info("Clear message received")
+                        self.audio_buffer.clear()
+                        self.last_buffer_process_time = time.time()
                 except json.JSONDecodeError:
                     self.logger.warning("Received non-JSON message")
                 except Exception as e:
