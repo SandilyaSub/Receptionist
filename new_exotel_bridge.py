@@ -41,7 +41,9 @@ class TranscriptManager:
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
         if text and text.strip():
+            self.logger.info(f"Adding to transcript - Role: {role}, Text: {text[:50]}{'...' if len(text) > 50 else ''}")
             self.transcript_data["conversation"].append({"role": role, "text": text.strip()})
+            self.logger.info(f"Transcript now has {len(self.transcript_data['conversation'])} entries")
 
     def get_full_transcript(self):
         """Returns the full transcript data."""
@@ -372,6 +374,9 @@ def create_gemini_config(tenant="bakery"):
             parts=[types.Part.from_text(text=tenant_prompt)],
             role="user"
         ),
+        # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
+        input_audio_transcription={},  # Empty dict enables input transcription
+        output_audio_transcription={}  # Empty dict enables output transcription
     )
     
     # Log the configuration for debugging
@@ -839,20 +844,42 @@ class GeminiSession:
                                 self.logger.info(f"Gemini text response: {text}")
                                 if self.transcript_manager:
                                     self.transcript_manager.add_to_transcript("assistant", text)
+                                else:
+                                    self.logger.warning("Cannot add text to transcript: transcript_manager is None")
                                     
                             # Process input audio transcription (user speech)
-                            if hasattr(response.server_content, 'input_transcription') and response.server_content.input_transcription:
-                                user_text = response.server_content.input_transcription.text
-                                # User transcript is now handled by TranscriptManager
-                                if self.transcript_manager:
-                                    self.transcript_manager.add_to_transcript("user", user_text)
+                            if hasattr(response, 'server_content'):
+                                self.logger.debug(f"Server content attributes: {dir(response.server_content)}")
+                                
+                                # Check for input transcription
+                                has_input = hasattr(response.server_content, 'input_transcription')
+                                self.logger.debug(f"Has input_transcription attribute: {has_input}")
+                                
+                                if has_input and response.server_content.input_transcription:
+                                    self.logger.info(f"Input transcription detected: {response.server_content.input_transcription}")
+                                    user_text = response.server_content.input_transcription.text
+                                    self.logger.info(f"User speech transcribed: {user_text}")
+                                    # User transcript is now handled by TranscriptManager
+                                    if self.transcript_manager:
+                                        self.transcript_manager.add_to_transcript("user", user_text)
+                                    else:
+                                        self.logger.warning("Cannot add user text to transcript: transcript_manager is None")
                                     
-                            # Process output audio transcription (model speech)
-                            if hasattr(response.server_content, 'output_transcription') and response.server_content.output_transcription:
-                                model_text = response.server_content.output_transcription.text
-                                # Model transcript is now handled by TranscriptManager
-                                if self.transcript_manager:
-                                    self.transcript_manager.add_to_transcript("assistant", model_text)
+                                # Check for output transcription
+                                has_output = hasattr(response.server_content, 'output_transcription')
+                                self.logger.debug(f"Has output_transcription attribute: {has_output}")
+                                
+                                if has_output and response.server_content.output_transcription:
+                                    self.logger.info(f"Output transcription detected: {response.server_content.output_transcription}")
+                                    model_text = response.server_content.output_transcription.text
+                                    self.logger.info(f"Model speech transcribed: {model_text}")
+                                    # Model transcript is now handled by TranscriptManager
+                                    if self.transcript_manager:
+                                        self.transcript_manager.add_to_transcript("assistant", model_text)
+                                    else:
+                                        self.logger.warning("Cannot add model text to transcript: transcript_manager is None")
+                            else:
+                                self.logger.debug("Response has no server_content attribute")
                             
                             # Process audio data if found
                             if audio_data:
