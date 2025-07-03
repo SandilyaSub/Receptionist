@@ -362,36 +362,22 @@ def create_gemini_config(tenant="bakery"):
     
     # Create and return the configuration
     # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
-    # audio transcription requires empty dictionaries, not boolean values
-    return types.LiveConnectConfig(
+    # Using the simplest possible configuration to avoid payload errors
+    logging.info("Creating Gemini Live API configuration with simplified settings")
+    
+    # Create a basic configuration first
+    config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
-        input_audio_transcription={},  # Enable input transcription
-        output_audio_transcription={},  # Enable output transcription
-        media_resolution="MEDIA_RESOLUTION_MEDIUM",
-        # Add VAD configuration to fix voice cut-off issues
-        realtime_input_config={
-            "automatic_activity_detection": {
-                "disabled": False,
-                "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_LOW,
-                "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_LOW,
-                "prefix_padding_ms": 20,
-                "silence_duration_ms": 500,  # Increased from default 100ms to allow for longer pauses
-            }
-        },
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
-            )
-        ),
-        context_window_compression=types.ContextWindowCompressionConfig(
-            trigger_tokens=25600,
-            sliding_window=types.SlidingWindow(target_tokens=12800),
-        ),
         system_instruction=types.Content(
             parts=[types.Part.from_text(text=tenant_prompt)],
             role="user"
         ),
     )
+    
+    # Log the configuration for debugging
+    logging.info(f"Gemini configuration created for tenant '{tenant}'")
+    
+    return config
 
 # Audio processing helper functions
 def resample_audio(audio_data: bytes, src_sample_rate: int, dst_sample_rate: int) -> bytes:
@@ -482,21 +468,32 @@ class GeminiSession:
         # Retry loop for initialization
         for attempt in range(max_retries):
             try:
+                # Log the model being used
+                model_name = "models/gemini-2.5-flash-preview-native-audio-dialog"
+                self.logger.info(f"Connecting to Gemini model: {model_name}")
+                
                 # Use async with to properly handle the AsyncGeneratorContextManager
                 self.gemini_session = client.aio.live.connect(
-                    model="models/gemini-2.5-flash-preview-native-audio-dialog",
+                    model=model_name,
                     config=tenant_config
                 )
+                
                 self.logger.info(f"Gemini session initialized successfully for tenant '{self.tenant}'")
                 return
             except Exception as e:
+                error_message = str(e)
+                self.logger.error(f"Gemini session initialization error details: {error_message}")
+                
+                if "invalid frame payload data" in error_message:
+                    self.logger.error("WebSocket payload error detected. This may be due to invalid configuration parameters.")
+                
                 if attempt < max_retries - 1:
-                    self.logger.warning(f"Gemini session initialization failed (attempt {attempt+1}/{max_retries}): {e}")
+                    self.logger.warning(f"Gemini session initialization failed (attempt {attempt+1}/{max_retries}). Retrying...")
                     # Exponential backoff
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Double the delay for next attempt
                 else:
-                    self.logger.error(f"Gemini session initialization failed after {max_retries} attempts: {e}")
+                    self.logger.error(f"Gemini session initialization failed after {max_retries} attempts.")
                     raise  # Re-raise the exception after all retries fail
     
     async def run(self):
