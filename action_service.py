@@ -9,9 +9,46 @@ import os
 import json
 import logging
 import asyncio
-from typing import Dict, Any, Optional
+import time
+from datetime import datetime
+from functools import wraps
+from typing import Dict, Any, Optional, Callable, List, Union
 from msg91_provider import MSG91Provider
 from supabase_client import get_supabase_client
+
+def async_retry(max_retries=3, delay=1, backoff=2, exceptions=(Exception,)):
+    """
+    Retry decorator for async functions with exponential backoff
+    
+    Args:
+        max_retries: Maximum number of retries before giving up
+        delay: Initial delay between retries in seconds
+        backoff: Backoff multiplier e.g. value of 2 will double the delay each retry
+        exceptions: Tuple of exceptions to catch and retry on
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Get logger from self if available (for class methods)
+            logger = args[0].logger if args and hasattr(args[0], 'logger') else logging.getLogger(__name__)
+            
+            retry_count = 0
+            current_delay = delay
+            
+            while True:
+                try:
+                    return await func(*args, **kwargs)
+                except exceptions as e:
+                    retry_count += 1
+                    if retry_count > max_retries:
+                        logger.error(f"Failed after {max_retries} retries: {str(e)}")
+                        return False
+                    
+                    logger.warning(f"Retry {retry_count}/{max_retries} after error: {str(e)}. Waiting {current_delay}s...")
+                    await asyncio.sleep(current_delay)
+                    current_delay *= backoff
+        return wrapper
+    return decorator
 
 class ActionService:
     def __init__(self, logger=None):
@@ -102,21 +139,20 @@ class ActionService:
         """
         try:
             # Query the call_details table for the given call_sid
+            # Note: Supabase execute() returns a synchronous response, not an awaitable
             call_details_response = self.supabase.table("call_details").select("*").eq("call_sid", call_sid).execute()
-            call_details_data = await call_details_response
             
-            if call_details_data and hasattr(call_details_data, 'data') and len(call_details_data.data) > 0:
+            if call_details_response and hasattr(call_details_response, 'data') and len(call_details_response.data) > 0:
                 self.logger.info(f"Found call details in call_details table for {call_sid}")
-                return call_details_data.data[0]
+                return call_details_response.data[0]
             
             # If not found in call_details, check exotel_call_details for basic info
             self.logger.info(f"No data in call_details, checking exotel_call_details for {call_sid}")
             exotel_details_response = self.supabase.table("exotel_call_details").select("*").eq("call_sid", call_sid).execute()
-            exotel_details_data = await exotel_details_response
             
-            if exotel_details_data and hasattr(exotel_details_data, 'data') and len(exotel_details_data.data) > 0:
+            if exotel_details_response and hasattr(exotel_details_response, 'data') and len(exotel_details_response.data) > 0:
                 self.logger.info(f"Found call details in exotel_call_details table for {call_sid}")
-                return exotel_details_data.data[0]
+                return exotel_details_response.data[0]
             
             self.logger.warning(f"No call details found in any table for {call_sid}")
             return None
@@ -157,9 +193,10 @@ class ActionService:
         # Invalid format
         return None
         
+    @async_retry(max_retries=3, delay=2, backoff=2, exceptions=(Exception,))
     async def _send_customer_notification(self, phone: str, data: Dict[str, Any], tenant_id: str) -> bool:
         """
-        Send notification to customer
+        Send notification to customer with retry mechanism
         
         Args:
             phone: Customer's phone number
@@ -171,16 +208,27 @@ class ActionService:
         """
         self.logger.info(f"Sending customer notification to {phone}")
         
-        return await self.msg91_provider.send_message(
-            to_number=phone,
-            template_name="service_booking",
-            template_data=self._prepare_customer_template_data(data, tenant_id)
-        )
+        if not phone or not phone.startswith("91"):
+            self.logger.error(f"Invalid phone number format: {phone}. Must start with '91'")
+            return False
+            
+        try:
+            result = await self.msg91_provider.send_message(
+                to_number=phone,
+                template_name="service_booking",
+                template_data=self._prepare_customer_template_data(data, tenant_id)
+            )
+            self.logger.info(f"Customer notification result: {result}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error sending customer notification: {str(e)}")
+            raise  # Re-raise for retry mechanism
         
+    @async_retry(max_retries=3, delay=2, backoff=2, exceptions=(Exception,))
     async def _send_owner_notification(self, phone: str, data: Dict[str, Any], 
-                                      customer_phone: str, tenant_id: str) -> bool:
+                                       customer_phone: str, tenant_id: str) -> bool:
         """
-        Send notification to business owner
+        Send notification to business owner with retry mechanism
         
         Args:
             phone: Owner's phone number
@@ -193,11 +241,21 @@ class ActionService:
         """
         self.logger.info(f"Sending owner notification to {phone} about customer {customer_phone}")
         
-        return await self.msg91_provider.send_message(
-            to_number=phone,
-            template_name="service_booking",
-            template_data=self._prepare_owner_template_data(data, customer_phone, tenant_id)
-        )
+        if not phone or not phone.startswith("91"):
+            self.logger.error(f"Invalid owner phone number format: {phone}. Must start with '91'")
+            return False
+            
+        try:
+            result = await self.msg91_provider.send_message(
+                to_number=phone,
+                template_name="service_booking",
+                template_data=self._prepare_owner_template_data(data, customer_phone, tenant_id)
+            )
+            self.logger.info(f"Owner notification result: {result}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error sending owner notification: {str(e)}")
+            raise  # Re-raise for retry mechanism
         
     def _prepare_customer_template_data(self, data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         """
