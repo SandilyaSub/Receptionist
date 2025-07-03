@@ -100,6 +100,19 @@ class TranscriptManager:
                 }
                 self.supabase_client.table("call_details").update(update_data).eq("id", record_id).execute()
                 self.logger.info(f"Successfully updated call_details for id {record_id} with analysis.")
+                
+                # Trigger the action service to send notifications
+                try:
+                    from action_service import ActionService
+                    action_service = ActionService(logger=self.logger)
+                    success = await action_service.process_call_actions(self.call_sid, self.tenant)
+                    if success:
+                        self.logger.info(f"Successfully processed notifications for call {self.call_sid}")
+                    else:
+                        self.logger.warning(f"Some notifications failed for call {self.call_sid}")
+                except Exception as action_error:
+                    self.logger.error(f"Error processing notifications: {action_error}")
+                    # Continue with cleanup even if notifications fail
             else:
                 self.logger.warning(f"Analysis returned no result for record {record_id}. No update performed.")
 
