@@ -29,7 +29,7 @@ def get_supabase_client() -> Client:
         
     # Get Supabase credentials from environment
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
+    supabase_key = os.getenv("SUPABASE_API_KEY")
     
     if not supabase_url or not supabase_key:
         logger = logging.getLogger(__name__)
