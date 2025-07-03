@@ -95,7 +95,22 @@ class ActionService:
                 return False
                 
             # 2. Format customer phone (from_number with +91 prefix)
-            customer_phone = self._format_phone_number(call_details.get("from_number"))
+            raw_phone = call_details.get("from_number")
+            self.logger.info(f"Raw customer phone from database: '{raw_phone}' for call_sid: {call_sid}")
+            
+            # Debug the call_details structure
+            self.logger.info(f"Call details keys: {list(call_details.keys())}")
+            
+            # Try alternative field names if 'from_number' is not present or empty
+            if not raw_phone:
+                possible_fields = ["From", "from", "caller", "caller_number", "phone"]
+                for field in possible_fields:
+                    if field in call_details and call_details[field]:
+                        raw_phone = call_details[field]
+                        self.logger.info(f"Found phone in alternative field '{field}': {raw_phone}")
+                        break
+            
+            customer_phone = self._format_phone_number(raw_phone)
             if not customer_phone:
                 self.logger.error(f"Invalid customer phone number for call_sid: {call_sid}")
                 return False
@@ -165,7 +180,7 @@ class ActionService:
         
     def _format_phone_number(self, phone: Optional[str]) -> Optional[str]:
         """
-        Format phone number to E.164 format (+91XXXXXXXXXX)
+        Format phone number for MSG91 (should start with country code)
         
         Args:
             phone: Raw phone number from database
@@ -174,23 +189,39 @@ class ActionService:
             Formatted phone number or None if invalid
         """
         if not phone:
+            self.logger.warning("Empty phone number provided to formatter")
             return None
             
+        self.logger.info(f"Formatting phone number: '{phone}'")
+            
         # Strip any non-digit characters
-        digits_only = ''.join(filter(str.isdigit, phone))
+        digits_only = ''.join(filter(str.isdigit, str(phone)))
+        self.logger.info(f"After stripping non-digits: '{digits_only}'")
         
         # Handle different formats
         if len(digits_only) == 10:
-            # 10-digit number, add +91 prefix
-            return f"+91{digits_only}"
+            # 10-digit number, add 91 prefix (no + for MSG91)
+            formatted = f"91{digits_only}"
+            self.logger.info(f"Formatted 10-digit number: '{formatted}'")
+            return formatted
         elif len(digits_only) > 10:
-            # Already has country code, ensure it starts with +
-            if digits_only.startswith('91'):
-                return f"+{digits_only}"
+            # Check if it already has country code
+            if digits_only.startswith('91') and len(digits_only) >= 12:
+                # Already has 91 prefix
+                self.logger.info(f"Number already has 91 prefix: '{digits_only}'")
+                return digits_only
+            elif digits_only.startswith('0'):
+                # Remove leading 0 and add 91
+                formatted = f"91{digits_only[1:]}"
+                self.logger.info(f"Removed leading 0 and added 91: '{formatted}'")
+                return formatted
             else:
-                return f"+{digits_only}"
+                # Add 91 prefix if not present
+                formatted = f"91{digits_only}"
+                self.logger.info(f"Added 91 prefix to number: '{formatted}'")
+                return formatted
         
-        # Invalid format
+        self.logger.warning(f"Invalid phone number format: '{phone}' (digits: '{digits_only}')")
         return None
         
     @async_retry(max_retries=3, delay=2, backoff=2, exceptions=(Exception,))
@@ -208,13 +239,24 @@ class ActionService:
         """
         self.logger.info(f"Sending customer notification to {phone}")
         
-        if not phone or not phone.startswith("91"):
-            self.logger.error(f"Invalid phone number format: {phone}. Must start with '91'")
+        # Ensure phone is properly formatted for MSG91
+        formatted_phone = phone
+        if not phone:
+            self.logger.error("No phone number provided for customer notification")
             return False
+            
+        # If phone doesn't start with 91, try to format it
+        if not str(phone).startswith("91"):
+            self.logger.warning(f"Phone number {phone} doesn't start with '91', attempting to format")
+            formatted_phone = self._format_phone_number(phone)
+            if not formatted_phone:
+                self.logger.error(f"Failed to format phone number: {phone}")
+                return False
+            self.logger.info(f"Reformatted phone number from {phone} to {formatted_phone}")
             
         try:
             result = await self.msg91_provider.send_message(
-                to_number=phone,
+                to_number=formatted_phone,
                 template_name="service_booking",
                 template_data=self._prepare_customer_template_data(data, tenant_id)
             )
@@ -241,15 +283,31 @@ class ActionService:
         """
         self.logger.info(f"Sending owner notification to {phone} about customer {customer_phone}")
         
-        if not phone or not phone.startswith("91"):
-            self.logger.error(f"Invalid owner phone number format: {phone}. Must start with '91'")
+        # Ensure owner phone is properly formatted for MSG91
+        formatted_phone = phone
+        if not phone:
+            self.logger.error("No phone number provided for owner notification")
             return False
+            
+        # If phone doesn't start with 91, try to format it
+        if not str(phone).startswith("91"):
+            self.logger.warning(f"Owner phone number {phone} doesn't start with '91', attempting to format")
+            formatted_phone = self._format_phone_number(phone)
+            if not formatted_phone:
+                self.logger.error(f"Failed to format owner phone number: {phone}")
+                return False
+            self.logger.info(f"Reformatted owner phone number from {phone} to {formatted_phone}")
+            
+        # Format customer phone for template if needed
+        formatted_customer_phone = customer_phone
+        if customer_phone and not str(customer_phone).startswith("91"):
+            formatted_customer_phone = self._format_phone_number(customer_phone) or customer_phone
             
         try:
             result = await self.msg91_provider.send_message(
-                to_number=phone,
+                to_number=formatted_phone,
                 template_name="service_booking",
-                template_data=self._prepare_owner_template_data(data, customer_phone, tenant_id)
+                template_data=self._prepare_owner_template_data(data, formatted_customer_phone, tenant_id)
             )
             self.logger.info(f"Owner notification result: {result}")
             return result
