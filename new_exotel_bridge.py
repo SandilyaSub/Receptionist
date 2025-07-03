@@ -448,6 +448,7 @@ class GeminiSession:
         self.audio_buffer = bytearray()
         self.buffer_threshold = 24000  # Buffer about 1 second of audio at 24kHz
         self.last_buffer_process_time = time.time()
+        self.last_buffer_send_time = time.time()  # Initialize missing attribute
         self.buffer_time_threshold = 0.5  # Time in seconds before processing regardless of buffer size
         
         # Will be detected from first audio chunk
