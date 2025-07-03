@@ -102,21 +102,29 @@ class ActionService:
         """
         try:
             # Query the call_details table for the given call_sid
-            response = await self.supabase.table("call_details").select("*").eq("call_sid", call_sid).execute()
+            call_details_response = self.supabase.table("call_details").select("*").eq("call_sid", call_sid).execute()
+            call_details_data = await call_details_response
             
-            if response.data and len(response.data) > 0:
-                return response.data[0]
+            if call_details_data and hasattr(call_details_data, 'data') and len(call_details_data.data) > 0:
+                self.logger.info(f"Found call details in call_details table for {call_sid}")
+                return call_details_data.data[0]
             
             # If not found in call_details, check exotel_call_details for basic info
-            response = await self.supabase.table("exotel_call_details").select("*").eq("call_sid", call_sid).execute()
+            self.logger.info(f"No data in call_details, checking exotel_call_details for {call_sid}")
+            exotel_details_response = self.supabase.table("exotel_call_details").select("*").eq("call_sid", call_sid).execute()
+            exotel_details_data = await exotel_details_response
             
-            if response.data and len(response.data) > 0:
-                return response.data[0]
-                
+            if exotel_details_data and hasattr(exotel_details_data, 'data') and len(exotel_details_data.data) > 0:
+                self.logger.info(f"Found call details in exotel_call_details table for {call_sid}")
+                return exotel_details_data.data[0]
+            
+            self.logger.warning(f"No call details found in any table for {call_sid}")
             return None
             
         except Exception as e:
             self.logger.error(f"Error fetching call details: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return None
         
     def _format_phone_number(self, phone: Optional[str]) -> Optional[str]:

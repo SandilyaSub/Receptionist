@@ -1060,18 +1060,19 @@ class GeminiSession:
         """Runs all post-call tasks in the background without blocking."""
         self.logger.info(f"Starting background post-call processing for {self.session_id}")
 
-        # 1. Save the raw transcript first - this is critical.
-        if self.transcript_manager:
-            self.logger.info("Saving transcript...")
-            await self.transcript_manager.save_transcript_and_analyze()
-        else:
-            self.logger.warning("No transcript manager available, skipping transcript save and analysis.")
-
-        # Fetch and store Exotel call details
+        # 1. Fetch and store Exotel call details first - needed for notifications
         if self.call_sid:
+            self.logger.info(f"Fetching Exotel call details first for call_sid: {self.call_sid}")
             await self.fetch_and_store_exotel_details()
         else:
             self.logger.warning("No call_sid available, skipping Exotel detail fetch.")
+
+        # 2. Save the transcript and analyze it
+        if self.transcript_manager:
+            self.logger.info("Saving transcript and analyzing...")
+            await self.transcript_manager.save_transcript_and_analyze()
+        else:
+            self.logger.warning("No transcript manager available, skipping transcript save and analysis.")
         
         # (Placeholder for the next step)
         # await self.analyze_transcript_for_booking()
