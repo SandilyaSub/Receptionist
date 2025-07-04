@@ -41,9 +41,8 @@ class TranscriptManager:
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
         if text and text.strip():
-            self.logger.info(f"Adding to transcript - Role: {role}, Text: {text[:50]}{'...' if len(text) > 50 else ''}")
+            # Removed verbose logging statements
             self.transcript_data["conversation"].append({"role": role, "text": text.strip()})
-            self.logger.info(f"Transcript now has {len(self.transcript_data['conversation'])} entries")
 
     def get_full_transcript(self):
         """Returns the full transcript data."""
