@@ -153,21 +153,38 @@ class ActionService:
             Dict containing call details or None if not found
         """
         try:
-            # Query the call_details table for the given call_sid
-            # Note: Supabase execute() returns a synchronous response, not an awaitable
-            call_details_response = self.supabase.table("call_details").select("*").eq("call_sid", call_sid).execute()
+            # Initialize merged_details to store combined data
+            merged_details = {}
+            found_any_data = False
             
-            if call_details_response and hasattr(call_details_response, 'data') and len(call_details_response.data) > 0:
-                self.logger.info(f"Found call details in call_details table for {call_sid}")
-                return call_details_response.data[0]
-            
-            # If not found in call_details, check exotel_call_details for basic info
-            self.logger.info(f"No data in call_details, checking exotel_call_details for {call_sid}")
+            # First check exotel_call_details for phone number and basic info
+            self.logger.info(f"Checking exotel_call_details for {call_sid}")
             exotel_details_response = self.supabase.table("exotel_call_details").select("*").eq("call_sid", call_sid).execute()
             
             if exotel_details_response and hasattr(exotel_details_response, 'data') and len(exotel_details_response.data) > 0:
                 self.logger.info(f"Found call details in exotel_call_details table for {call_sid}")
-                return exotel_details_response.data[0]
+                exotel_data = exotel_details_response.data[0]
+                merged_details.update(exotel_data)  # Add all exotel data to merged details
+                found_any_data = True
+                self.logger.info(f"Phone number from exotel_call_details: {merged_details.get('from_number')}")
+            
+            # Then check call_details for transcript and analysis data
+            self.logger.info(f"Checking call_details for {call_sid}")
+            call_details_response = self.supabase.table("call_details").select("*").eq("call_sid", call_sid).execute()
+            
+            if call_details_response and hasattr(call_details_response, 'data') and len(call_details_response.data) > 0:
+                self.logger.info(f"Found call details in call_details table for {call_sid}")
+                call_data = call_details_response.data[0]
+                # Update merged details with call_details data, but don't overwrite from_number if it exists
+                for key, value in call_data.items():
+                    if key != 'from_number' or 'from_number' not in merged_details:
+                        merged_details[key] = value
+                found_any_data = True
+            
+            if found_any_data:
+                self.logger.info(f"Merged call details keys: {list(merged_details.keys())}")
+                self.logger.info(f"Final from_number: {merged_details.get('from_number')}")
+                return merged_details
             
             self.logger.warning(f"No call details found in any table for {call_sid}")
             return None
