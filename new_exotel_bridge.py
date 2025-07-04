@@ -355,7 +355,8 @@ def create_gemini_config(tenant="bakery"):
     # Using the simplest possible configuration to avoid payload errors
     logging.info("Creating Gemini Live API configuration with simplified settings")
     
-    # Create a configuration with optimized VAD and audio format settings
+    # Create a configuration with optimized VAD settings using the correct enum types
+    # Following documentation at https://ai.google.dev/gemini-api/docs/live-guide#automatic-vad-configuration
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         system_instruction=types.Content(
@@ -365,19 +366,15 @@ def create_gemini_config(tenant="bakery"):
         # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
         input_audio_transcription={},  # Empty dict enables input transcription
         output_audio_transcription={},  # Empty dict enables output transcription
-        # Add VAD configuration for better short utterance detection
+        # Add VAD configuration for better short utterance detection using proper enums
         realtime_input_config={
             "automatic_activity_detection": {
-                "speech_start_threshold": 0.3,  # Lower for telephony
-                "speech_end_threshold": 0.5,    # Faster end detection
-                "min_speech_duration": 0.1      # Catch short utterances
+                "disabled": False,  # Enable VAD
+                "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
+                "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
+                "prefix_padding_ms": 20,  # Default value
+                "silence_duration_ms": 500  # Shorter silence to detect end of speech faster
             }
-        },
-        # Specify audio format to match Exotel's requirements (8kHz)
-        audio_format={
-            "sample_rate": 8000,  # Match Exotel's 8kHz
-            "channels": 1,
-            "bits_per_sample": 16
         }
     )
     
