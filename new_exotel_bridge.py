@@ -451,7 +451,8 @@ class GeminiSession:
         
         # Audio buffer for combining chunks before sending to client
         self.audio_buffer = bytearray()
-        self.buffer_threshold = 24000  # Buffer about 1 second of audio at 24kHz
+        self.buffer_threshold = 3840  # Smaller buffer, but still above Exotel's minimum (multiple of 320 bytes)
+        self.min_chunk_size = 3840    # Ensure we never send less than this
         self.last_buffer_process_time = time.time()
         self.last_buffer_send_time = time.time()  # Initialize missing attribute
         self.buffer_time_threshold = 0.5  # Time in seconds before processing regardless of buffer size
@@ -927,7 +928,17 @@ class GeminiSession:
     async def _send_audio_to_exotel(self):
         """Helper method to send buffered audio to Exotel"""
         self.audio_chunk_counter += 1
-        self.logger.debug(f"Sending audio chunk {self.audio_chunk_counter} ({len(self.audio_buffer)} bytes)")
+        
+        # Check if buffer size meets minimum chunk size requirement
+        buffer_size = len(self.audio_buffer)
+        self.logger.debug(f"Sending audio chunk {self.audio_chunk_counter} ({buffer_size} bytes)")
+        
+        if buffer_size < self.min_chunk_size:
+            self.logger.debug(f"Buffer size {buffer_size} is below minimum chunk size {self.min_chunk_size}, padding buffer")
+            # Pad with silence to reach minimum chunk size (zeros for PCM audio)
+            padding_needed = self.min_chunk_size - buffer_size
+            self.audio_buffer.extend(bytes(padding_needed))
+            self.logger.debug(f"Added {padding_needed} bytes of padding, new buffer size: {len(self.audio_buffer)} bytes")
         
         # Process the entire buffer
         buffered_audio = bytes(self.audio_buffer)
