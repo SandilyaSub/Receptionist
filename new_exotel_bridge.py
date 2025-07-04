@@ -304,21 +304,9 @@ def load_system_prompt(tenant="bakery"):
     # Get the current script directory to use absolute paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Define the prompts directory with absolute path
-    prompts_dir = os.path.join(script_dir, "prompts")
-    
-    # Log the directories for debugging
-    logging.info(f"Script directory: {script_dir}")
-    logging.info(f"Prompts directory: {prompts_dir}")
-    logging.info(f"Current working directory: {os.getcwd()}")
-    
-    # List all files in the prompts directory for debugging
-    try:
-        prompt_files = os.listdir(prompts_dir)
-        logging.info(f"Available prompt files: {prompt_files}")
-    except Exception as e:
-        logging.error(f"Failed to list prompt files: {e}")
-        prompt_files = []
+    # Log the directory for debugging
+    logging.debug(f"Script directory: {script_dir}")
+    logging.debug(f"Current working directory: {os.getcwd()}")
     
     # Construct the prompt file path based on tenant
     prompt_path = os.path.join(os.path.dirname(__file__), 'tenant_repository', tenant, 'prompts', 'assistant.txt')
@@ -857,9 +845,8 @@ class GeminiSession:
                                 self.logger.debug(f"Has input_transcription attribute: {has_input}")
                                 
                                 if has_input and response.server_content.input_transcription:
-                                    self.logger.info(f"Input transcription detected: {response.server_content.input_transcription}")
+                                    self.logger.debug(f"Input transcription detected: {response.server_content.input_transcription}")
                                     user_text = response.server_content.input_transcription.text
-                                    self.logger.info(f"User speech transcribed: {user_text}")
                                     # User transcript is now handled by TranscriptManager
                                     if self.transcript_manager:
                                         self.transcript_manager.add_to_transcript("user", user_text)
@@ -871,9 +858,8 @@ class GeminiSession:
                                 self.logger.debug(f"Has output_transcription attribute: {has_output}")
                                 
                                 if has_output and response.server_content.output_transcription:
-                                    self.logger.info(f"Output transcription detected: {response.server_content.output_transcription}")
+                                    self.logger.debug(f"Output transcription detected: {response.server_content.output_transcription}")
                                     model_text = response.server_content.output_transcription.text
-                                    self.logger.info(f"Model speech transcribed: {model_text}")
                                     # Model transcript is now handled by TranscriptManager
                                     if self.transcript_manager:
                                         self.transcript_manager.add_to_transcript("assistant", model_text)
