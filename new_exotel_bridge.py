@@ -355,7 +355,7 @@ def create_gemini_config(tenant="bakery"):
     # Using the simplest possible configuration to avoid payload errors
     logging.info("Creating Gemini Live API configuration with simplified settings")
     
-    # Create a basic configuration first
+    # Create a configuration with optimized VAD and audio format settings
     config = types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         system_instruction=types.Content(
@@ -364,7 +364,21 @@ def create_gemini_config(tenant="bakery"):
         ),
         # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
         input_audio_transcription={},  # Empty dict enables input transcription
-        output_audio_transcription={}  # Empty dict enables output transcription
+        output_audio_transcription={},  # Empty dict enables output transcription
+        # Add VAD configuration for better short utterance detection
+        realtime_input_config={
+            "automatic_activity_detection": {
+                "speech_start_threshold": 0.3,  # Lower for telephony
+                "speech_end_threshold": 0.5,    # Faster end detection
+                "min_speech_duration": 0.1      # Catch short utterances
+            }
+        },
+        # Specify audio format to match Exotel's requirements (8kHz)
+        audio_format={
+            "sample_rate": 8000,  # Match Exotel's 8kHz
+            "channels": 1,
+            "bits_per_sample": 16
+        }
     )
     
     # Log the configuration for debugging
@@ -443,7 +457,7 @@ class GeminiSession:
         self.min_chunk_size = 3840    # Ensure we never send less than this
         self.last_buffer_process_time = time.time()
         self.last_buffer_send_time = time.time()  # Initialize missing attribute
-        self.buffer_time_threshold = 0.5  # Time in seconds before processing regardless of buffer size
+        self.buffer_time_threshold = 0.1  # Reduced time threshold for faster processing of short utterances
         
         # Will be detected from first audio chunk
         self.gemini_output_sample_rate = None
@@ -1018,7 +1032,7 @@ class GeminiSession:
     async def send_keep_alive_messages(self):
         """Send periodic keep-alive messages to prevent Exotel from timing out the connection."""
         self.logger.info("Starting keep-alive message task")
-        keep_alive_interval = 2.0  # Send a keep-alive every 2 seconds
+        keep_alive_interval = 10.0  # Increased to reduce unnecessary traffic and potential interference
         keep_alive_counter = 0
         
         try:
