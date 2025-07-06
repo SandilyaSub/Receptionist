@@ -34,7 +34,7 @@ class WhatsAppNotificationService:
         # Template mapping based on call_type
         self.template_mapping = {
             "Booking": "booking_details.json",
-            "Informational": "information.json"
+            "Informational": "information.json"  # Using lowercase to match deployment environment
         }
         
         # Validate initialization
