@@ -459,8 +459,10 @@ class ActionService:
             await self.supabase.table("notifications").insert({
                 "call_sid": call_sid,
                 "notification_type": "whatsapp",
+                "recipient": "multiple",  # Required field - cannot be null
+                "recipient_type": "mixed",  # Required field - cannot be null
                 "status": "success" if success_count == total_count else "partial_failure",
-                "details": json.dumps({
+                "payload": json.dumps({  # Use payload instead of details to match schema
                     "success_count": success_count,
                     "total_count": total_count,
                     "timestamp": str(asyncio.get_event_loop().time())

@@ -152,20 +152,39 @@ class WhatsAppNotificationService:
             # Fallback message in case of error
             return "Thank you for your call. We'll be in touch soon."
     
+    def format_phone_number(self, phone: str) -> str:
+        """
+        Format phone number from Exotel format to MSG91 format
+        
+        Args:
+            phone: Phone number in Exotel format (e.g., '09901678665')
+            
+        Returns:
+            Phone number in MSG91 format (e.g., '919901678665')
+        """
+        # Remove any leading zeros
+        phone = phone.lstrip('0')
+        
+        # Add country code if not present
+        if not phone.startswith('91'):
+            phone = '91' + phone
+            
+        return phone
+    
     async def gather_template_data(self, call_sid: str, tenant_id: str, call_details: Dict[str, Any]) -> Dict[str, Any]:
         """
         Gather all data needed for the template
         
         Args:
             call_sid: The Exotel call SID
-            tenant_id: The tenant identifier
-            call_details: Call details including call_type and critical_call_details
+            tenant_id: The tenant ID
+            call_details: Call details from the analyzer
             
         Returns:
-            Dict with all template variables or empty dict if required data is missing
+            Dict with data for the template or empty dict if data gathering failed
         """
         try:
-            # Get from_number from exotel_call_details
+            # Fetch customer phone number from Exotel call details
             supabase = get_supabase_client()
             exotel_response = await asyncio.to_thread(
                 lambda: supabase.table("exotel_call_details")
@@ -174,8 +193,8 @@ class WhatsAppNotificationService:
                 .execute()
             )
             
-            if not exotel_response.data or len(exotel_response.data) == 0:
-                self.logger.error(f"No exotel_call_details found for call_sid: {call_sid}")
+            if not exotel_response or not exotel_response.data or len(exotel_response.data) == 0:
+                self.logger.error(f"No Exotel call details found for call_sid: {call_sid}")
                 return {}
                 
             exotel_data = exotel_response.data[0]
@@ -184,6 +203,9 @@ class WhatsAppNotificationService:
             if not customer_phone:
                 self.logger.error(f"No customer phone number found for call_sid: {call_sid}")
                 return {}
+                
+            # Format the phone number to MSG91 format
+            customer_phone = self.format_phone_number(customer_phone)
             
             # Get tenant config data
             tenant_data = await self.fetch_tenant_config(tenant_id)
@@ -249,7 +271,7 @@ class WhatsAppNotificationService:
                 
             template_json = json.loads(template_content[json_start:json_end])
             
-            # Insert phone numbers
+            # Insert phone numbers in the main template
             template_json["to"] = template_data["phone_numbers"]
             
             # Access the components section
@@ -258,15 +280,23 @@ class WhatsAppNotificationService:
                 self.logger.error(f"Invalid template structure in {template_name}: missing to_and_components")
                 return None
                 
+            # Make sure the recipient phone number is also set in the to_and_components section
+            if template_data["phone_numbers"] and len(template_data["phone_numbers"]) > 0:
+                to_and_components[0]["to"] = template_data["phone_numbers"]
+                
             components = to_and_components[0]["components"]
             
             # Update component values with the correct parameters
             if "body_1" in components:
-                components["body_1"]["value"] = template_data["branch_name"]
+                components["body_1"]["value"] = template_data.get("branch_name", "")
             if "body_2" in components:
-                components["body_2"]["value"] = template_data["message_body"]
+                # Ensure message_body is never null
+                message_body = template_data.get("message_body", "")
+                if message_body is None:
+                    message_body = "Thank you for your call. We'll be in touch soon."
+                components["body_2"]["value"] = message_body
             if "body_3" in components:
-                components["body_3"]["value"] = template_data["branch_head_phone"]
+                components["body_3"]["value"] = template_data.get("branch_head_phone", "")
             
             return template_json
             
