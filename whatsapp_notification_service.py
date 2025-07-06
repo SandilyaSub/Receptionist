@@ -198,7 +198,7 @@ class WhatsAppNotificationService:
                 self.logger.error(f"Missing branch_name or branch_head_phone_number for tenant_id: {tenant_id}")
                 return {}
             
-            # Generate AI message
+            # Get call type and critical call details
             call_type = call_details.get("call_type")
             critical_call_details = call_details.get("critical_call_details", {})
             
@@ -208,6 +208,10 @@ class WhatsAppNotificationService:
                 
             message_body = await self.generate_ai_message(call_type, critical_call_details)
             
+            # Format the template data according to MSG91 WhatsApp template requirements
+            # body_1.value = branch_name from tenant_configs
+            # body_2.value = AI-generated message body
+            # body_3.value = branch_head_phone_number from tenant_configs
             return {
                 "phone_numbers": [customer_phone],
                 "branch_name": branch_name,
@@ -245,16 +249,24 @@ class WhatsAppNotificationService:
                 
             template_json = json.loads(template_content[json_start:json_end])
             
-            # Insert variables
+            # Insert phone numbers
             template_json["to"] = template_data["phone_numbers"]
             
             # Access the components section
-            components = template_json["payload"]["template"]["to_and_components"][0]["components"]
+            to_and_components = template_json["payload"]["template"]["to_and_components"]
+            if not to_and_components or len(to_and_components) == 0:
+                self.logger.error(f"Invalid template structure in {template_name}: missing to_and_components")
+                return None
+                
+            components = to_and_components[0]["components"]
             
-            # Update component values
-            components["body_1"]["value"] = template_data["branch_name"]
-            components["body_2"]["value"] = template_data["message_body"]
-            components["body_3"]["value"] = template_data["branch_head_phone"]
+            # Update component values with the correct parameters
+            if "body_1" in components:
+                components["body_1"]["value"] = template_data["branch_name"]
+            if "body_2" in components:
+                components["body_2"]["value"] = template_data["message_body"]
+            if "body_3" in components:
+                components["body_3"]["value"] = template_data["branch_head_phone"]
             
             return template_json
             
