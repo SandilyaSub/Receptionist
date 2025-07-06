@@ -1,0 +1,41 @@
+curl --location --request POST
+  'https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/'
+  --header 'Content-Type: application/json'
+  --header 'authkey: <authkey>'
+  --data-raw '{
+    "integrated_number": "15557892623",
+    "content_type": "template",
+    "payload": {
+        "messaging_product": "whatsapp",
+        "type": "template",
+        "template": {
+            "name": "booking_details",
+            "language": {
+                "code": "en",
+                "policy": "deterministic"
+            },
+            "namespace": "1c102e3c_6aea_4360_95a3_5d81885a477e",
+            "to_and_components": [
+                {
+                    "to": [
+                        "<list_of_phone_numbers>"
+                    ],
+                    "components": {
+                        "body_1": {
+                            "type": "text",
+                            "value": "value1"
+                        },
+                        "body_2": {
+                            "type": "text",
+                            "value": "value1"
+                        },
+                        "body_3": {
+                            "type": "text",
+                            "value": "value1"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}'

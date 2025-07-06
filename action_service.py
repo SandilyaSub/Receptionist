@@ -15,6 +15,7 @@ from functools import wraps
 from typing import Dict, Any, Optional, Callable, List, Union
 from msg91_provider import MSG91Provider
 from supabase_client import get_supabase_client
+from whatsapp_notification_service import WhatsAppNotificationService
 
 def async_retry(max_retries=3, delay=1, backoff=2, exceptions=(Exception,)):
     """
@@ -68,6 +69,9 @@ class ActionService:
             logger=self.logger
         )
         
+        # Initialize WhatsApp notification service
+        self.whatsapp_service = WhatsAppNotificationService(logger=self.logger)
+        
         # Default owner phone (can be overridden per tenant later)
         self.owner_phone = os.getenv("OWNER_PHONE", "+919482743864")  # Default from spec
         
@@ -108,33 +112,58 @@ class ActionService:
                     if field in call_details and call_details[field]:
                         raw_phone = call_details[field]
                         self.logger.info(f"Found phone in alternative field '{field}': {raw_phone}")
-                        break
             
             customer_phone = self._format_phone_number(raw_phone)
             if not customer_phone:
                 self.logger.error(f"Invalid customer phone number for call_sid: {call_sid}")
                 return False
             
-            # 3. Extract message content
-            message_data = {
-                "call_type": call_details.get("call_type", "Unknown"),
-                "details": call_details.get("critical_call_details", "No details available")
-            }
+            # 3. Send notifications
+            results = []
             
-            self.logger.info(f"Sending notifications for {call_sid} - Type: {message_data['call_type']}")
+            # 3.1 Send customer notification if phone available and call_type is supported
+            customer_phone = call_details.get("from_number")
+            call_type = call_details.get("call_type", "Unknown")
             
-            # 4. Send messages (in parallel)
-            results = await asyncio.gather(
-                self._send_customer_notification(customer_phone, message_data, tenant_id),
-                self._send_owner_notification(self.owner_phone, message_data, customer_phone, tenant_id),
+            # Only send notifications for Booking and Informational call types
+            if customer_phone and call_type in ["Booking", "Informational"]:
+                self.logger.info(f"Sending {call_type} notification to customer {customer_phone}")
+                customer_result = await self._send_customer_notification(
+                    phone=customer_phone,
+                    data={
+                        "call_type": call_type,
+                        "details": call_details.get("critical_call_details", {}),
+                        "critical_call_details": call_details.get("critical_call_details", {})
+                    },
+                    tenant_id=tenant_id,
+                    call_sid=call_sid
+                )
+                results.append(("customer", customer_result))
+            else:
+                if not customer_phone:
+                    self.logger.warning(f"No customer phone available for call_sid: {call_sid}")
+                else:
+                    self.logger.info(f"Skipping notification for call_type: {call_type}")
+            
+            # 3.2 Send owner notification
+            owner_result = await self._send_owner_notification(
+                phone=self.owner_phone,
+                data={
+                    "call_type": call_type,
+                    "details": call_details.get("critical_call_details", {}),
+                    "critical_call_details": call_details.get("critical_call_details", {})
+                },
+                customer_phone=customer_phone,
+                tenant_id=tenant_id,
                 return_exceptions=True
             )
+            results.append(("owner", owner_result))
+            
+            # Log notification results
+            await self._log_notification_results(call_sid, results)
             
             # Check for exceptions in results
             success = all(isinstance(r, bool) and r for r in results)
-            
-            # 5. Log action results to database
-            await self._log_notification_results(call_sid, results)
             
             return success
             
@@ -242,7 +271,7 @@ class ActionService:
         return None
         
     @async_retry(max_retries=3, delay=2, backoff=2, exceptions=(Exception,))
-    async def _send_customer_notification(self, phone: str, data: Dict[str, Any], tenant_id: str) -> bool:
+    async def _send_customer_notification(self, phone: str, data: Dict[str, Any], tenant_id: str, call_sid: str) -> bool:
         """
         Send notification to customer with retry mechanism
         
@@ -250,6 +279,7 @@ class ActionService:
             phone: Customer's phone number
             data: Message data (call_type, details)
             tenant_id: The tenant identifier
+            call_sid: The Exotel call SID
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -270,12 +300,46 @@ class ActionService:
                 self.logger.error(f"Failed to format phone number: {phone}")
                 return False
             self.logger.info(f"Reformatted phone number from {phone} to {formatted_phone}")
+        
+        # Get call type from data
+        call_type = data.get("call_type")
+        if not call_type:
+            self.logger.error("No call_type provided for customer notification")
+            return False
+            
+        # Select template based on call_type
+        template_name = await self.whatsapp_service.select_template(call_type)
+        if not template_name:
+            self.logger.info(f"Skipping notification for call_type: {call_type}")
+            return False
+            
+        # Gather template data
+        template_data = await self.whatsapp_service.gather_template_data(
+            call_sid=call_sid,
+            tenant_id=tenant_id,
+            call_details=data
+        )
+        
+        if not template_data:
+            self.logger.error(f"Failed to gather template data for call_sid: {call_sid}")
+            return False
+            
+        # Render template
+        rendered_template = await self.whatsapp_service.render_template(
+            template_name=template_name,
+            template_data=template_data
+        )
+        
+        if not rendered_template:
+            self.logger.error(f"Failed to render template {template_name} for call_sid: {call_sid}")
+            return False
             
         try:
+            # Send using MSG91 provider
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name="service_booking",
-                template_data=self._prepare_customer_template_data(data, tenant_id)
+                template_name=template_name.split('.')[0],  # Remove .json extension
+                template_data=rendered_template
             )
             self.logger.info(f"Customer notification result: {result}")
             return result
@@ -285,7 +349,8 @@ class ActionService:
         
     @async_retry(max_retries=3, delay=2, backoff=2, exceptions=(Exception,))
     async def _send_owner_notification(self, phone: str, data: Dict[str, Any], 
-                                       customer_phone: str, tenant_id: str) -> bool:
+                                        customer_phone: str, tenant_id: str,
+                                        return_exceptions: bool = False) -> bool:
         """
         Send notification to business owner with retry mechanism
         
@@ -294,6 +359,7 @@ class ActionService:
             data: Message data (call_type, details)
             customer_phone: Customer's phone number
             tenant_id: The tenant identifier
+            return_exceptions: Whether to return exceptions instead of raising them
             
         Returns:
             bool: True if sent successfully, False otherwise
@@ -319,7 +385,9 @@ class ActionService:
         formatted_customer_phone = customer_phone
         if customer_phone and not str(customer_phone).startswith("91"):
             formatted_customer_phone = self._format_phone_number(customer_phone) or customer_phone
-            
+        
+        # For now, we're keeping the owner notification simple and not using the AI-generated content
+        # We could enhance this in the future to use the WhatsApp notification service as well
         try:
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
@@ -330,6 +398,8 @@ class ActionService:
             return result
         except Exception as e:
             self.logger.error(f"Error sending owner notification: {str(e)}")
+            if return_exceptions:
+                return e
             raise  # Re-raise for retry mechanism
         
     def _prepare_customer_template_data(self, data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
