@@ -128,60 +128,63 @@ class WhatsAppNotificationService:
             # Use the genai package exactly as in transcript_analyzer.py
             client = genai.Client(api_key=GEMINI_API_KEY)
             
-            # Create a more structured prompt
+            # Log the input data for debugging
+            self.logger.info(f"Input data for AI message generation: {json.dumps(input_data, indent=2)}")
+            
+            # Format call details in a more structured way
+            details_str = ""
+            if input_data.get('critical_call_details'):
+                for key, value in input_data['critical_call_details'].items():
+                    details_str += f"{key}: {value}\n"
+            
+            # Create a more structured prompt that will generate output similar to the owner message
             prompt = f"""
-            Call Type: {input_data['call_type']}
+            Generate a WhatsApp notification message for a {input_data.get('call_type', 'Unknown')} call.
             
             Call Details:
-            {json.dumps(input_data['critical_call_details'], indent=2)}
+            {details_str}
             
-            Please generate a friendly, professional WhatsApp message based on the above call details.
-            Include all relevant information from the call details.
-            Use emojis where appropriate to make the message more engaging.
-            End with a brief, appropriate pun related to the business.
+            Format the message like this example:
+            "New Booking from [PHONE]. Details: [JSON_DETAILS]"
+            
+            Include ALL the call details in a concise format. Make it professional and friendly.
+            Do NOT use placeholders - use the actual values from the call details.
             """
             
-            self.logger.debug(f"Sending prompt to Gemini: {prompt}")
+            self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
             
-            # Call the model using asyncio.to_thread to avoid blocking
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-2.5-flash",
-                contents=[
-                    {"role": "user", "parts": [{"text": prompt}]}
-                ],
-                generation_config={
-                    "temperature": 0.7,
-                    "max_output_tokens": 500,
-                },
-                safety_settings=[
-                    {
-                        "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_HATE_SPEECH",
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_NONE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_NONE"
+            # Call the model using asyncio.to_thread to avoid blocking - simplified API call
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-2.5-flash",
+                    contents=[
+                        {"role": "user", "parts": [{"text": prompt}]}
+                    ],
+                    generation_config={
+                        "temperature": 0.7,
+                        "max_output_tokens": 500,
                     }
-                ]
-            )
-            
-            if not response or not hasattr(response, 'text'):
-                raise ValueError("Invalid response from Gemini API")
+                    # Safety settings removed as requested
+                )
                 
-            self.logger.debug(f"AI response text: {response.text}")
-            return response.text.strip()
+                # Log the raw response for debugging
+                self.logger.info(f"Raw Gemini API response: {response}")
+                
+                if not response or not hasattr(response, 'text'):
+                    self.logger.error("Invalid response from Gemini API: missing 'text' attribute")
+                    raise ValueError("Invalid response from Gemini API: missing 'text' attribute")
+                    
+                self.logger.info(f"AI generated message: {response.text}")
+                return response.text.strip()
+                
+            except Exception as api_error:
+                self.logger.error(f"Error in Gemini API call: {str(api_error)}")
+                raise  # Re-raise to be caught by the outer exception handler
                 
         except Exception as e:
             self.logger.error(f"Error generating AI message: {str(e)}")
+            self.logger.exception("Full exception details:")
             # Fallback message in case of error
             return "Thank you for your call. We'll be in touch soon."
     
