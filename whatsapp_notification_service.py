@@ -155,17 +155,18 @@ class WhatsAppNotificationService:
             
             # Call the model using asyncio.to_thread to avoid blocking - simplified API call
             try:
+                # Using the correct parameter format for the current Gemini SDK version
+                # Note: The API doesn't support generation_config as a separate parameter
                 response = await asyncio.to_thread(
                     client.models.generate_content,
                     model="gemini-2.5-flash",
                     contents=[
                         {"role": "user", "parts": [{"text": prompt}]}
                     ],
-                    generation_config={
-                        "temperature": 0.7,
-                        "max_output_tokens": 500,
-                    }
-                    # Safety settings removed as requested
+                    # Parameters must be passed directly, not in a generation_config object
+                    thinking_config=types.ThinkingConfig(thinking_budget=0) # Disables thinking
+                    temperature=0.7,
+                    max_output_tokens=500
                 )
                 
                 # Log the raw response for debugging
