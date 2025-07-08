@@ -155,26 +155,49 @@ class WhatsAppNotificationService:
             
             # Call the model using asyncio.to_thread to avoid blocking - simplified API call
             try:
-                # Create generation config according to official docs
-                generation_config = types.GenerationConfig(
-                    temperature=0.5,  # Lower temperature for more consistent output
-                    max_output_tokens=500,
-                    top_p=0.95,
-                    top_k=40
+                # Create contents using the types.Content and types.Part format from the cookbook
+                contents = [
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_text(text=prompt),
+                        ],
+                    ),
+                ]
+                
+                # Create generate_content_config using the exact format from the cookbook
+                generate_content_config = types.GenerateContentConfig(
+                    temperature=0.7,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_budget=0,
+                    ),
+                    safety_settings=[
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_HARASSMENT",
+                            threshold="BLOCK_NONE",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_HATE_SPEECH",
+                            threshold="BLOCK_NONE",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            threshold="BLOCK_NONE",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                            threshold="BLOCK_NONE",
+                        ),
+                    ],
+                    response_mime_type="text/plain",
                 )
                 
-                # Create thinking config to disable thinking
-                thinking_config = types.ThinkingConfig(thinking_budget=0)
-                
-                # Call the model with proper configs
+                # Call the model with the config parameter exactly as in the cookbook
                 response = await asyncio.to_thread(
                     client.models.generate_content,
                     model="gemini-2.5-flash",
-                    contents=[
-                        {"role": "user", "parts": [{"text": prompt}]}
-                    ],
-                    generation_config=generation_config,
-                    thinking_config=thinking_config
+                    contents=contents,
+                    config=generate_content_config,
                 )
                 
                 # Log the raw response for debugging
