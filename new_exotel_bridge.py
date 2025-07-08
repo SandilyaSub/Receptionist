@@ -634,6 +634,17 @@ class GeminiSession:
                                 self.to_number = start_data.get("to")
                                 self.custom_parameters = start_data.get("custom_parameters", {})
                                 
+                                # Check if tenant is specified in custom_parameters and update if valid
+                                if self.custom_parameters and "tenant" in self.custom_parameters:
+                                    custom_tenant = self.custom_parameters["tenant"]
+                                    # Verify tenant exists in repository
+                                    tenant_prompt_path = os.path.join(TENANT_REPOSITORY_DIR, custom_tenant, "prompts", "assistant.txt")
+                                    if os.path.exists(tenant_prompt_path):
+                                        self.logger.info(f"Updating tenant from '{self.tenant}' to '{custom_tenant}' based on custom_parameters")
+                                        self.tenant = custom_tenant
+                                    else:
+                                        self.logger.warning(f"Tenant '{custom_tenant}' specified in custom_parameters does not have a valid prompt file. Using '{self.tenant}' instead.")
+                                
                                 # Initialize transcript manager for this session
                                 self.logger.info("Creating transcript manager")
                                 print(f"DEBUG: Creating transcript manager for call_sid: {self.call_sid}")
