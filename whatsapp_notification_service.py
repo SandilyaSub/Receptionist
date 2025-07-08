@@ -137,18 +137,37 @@ class WhatsAppNotificationService:
                 for key, value in input_data['critical_call_details'].items():
                     details_str += f"{key}: {value}\n"
             
-            # Create a more structured prompt that will generate output similar to the owner message
+            # Create a more structured prompt with clear instructions for formatting and style
             prompt = f"""
-            Generate a WhatsApp notification message for a {input_data.get('call_type', 'Unknown')} call.
+            Create a WhatsApp notification message for a {input_data.get('call_type', 'Unknown')} call with the following details:
             
-            Call Details:
             {details_str}
+            """
             
-            Format the message like this example:
-            "New Booking from [PHONE]. Details: [JSON_DETAILS]"
+            # Create system instruction for better message quality
+            system_instruction = """
+            You are an exceptional copywriter, expertly crafting WhatsApp messages for a receptionist system that excels at customer communication.
             
-            Include ALL the call details in a concise format. Make it professional and friendly.
-            Do NOT use placeholders - use the actual values from the call details.
+            Your core responsibility is to transform raw call details into polished, customer-facing WhatsApp messages. 
+            
+            Format the message with this specific structure:
+            1. Start with an emoji and a friendly greeting/confirmation message
+            2. Add a "Details:" section with bullet points
+            3. Each detail should have a relevant emoji prefix
+            4. End with a brief, appropriate pun related to the business
+            
+            Example format:
+            🎉 Your [PRODUCT] booking is confirmed! 🎂
+            Details:
+            🗓️ Pickup: [DATE]
+            ⏰ Time: [TIME]
+            ⚖️ Weight: [WEIGHT]
+            🍰 Shape: [SHAPE]
+            [FUN CLOSING LINE WITH PUN]
+            
+            Use emojis generously but appropriately to enhance readability and engagement.
+            Keep the message concise, friendly, and visually organized.
+            Include ALL the provided details in a customer-friendly format.
             """
             
             self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
@@ -190,6 +209,9 @@ class WhatsAppNotificationService:
                         ),
                     ],
                     response_mime_type="text/plain",
+                    system_instruction=[
+                        types.Part.from_text(text=system_instruction),
+                    ],
                 )
                 
                 # Call the model with the config parameter exactly as in the cookbook
