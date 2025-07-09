@@ -535,9 +535,13 @@ class GeminiSession:
                 # Check for tenant in custom_parameters
                 if "custom_parameters" in start_data and "tenant" in start_data["custom_parameters"]:
                     new_tenant = start_data["custom_parameters"]["tenant"]
-                    if new_tenant in ["bakery", "saloon"]:
-                        self.logger.info(f"Found tenant '{new_tenant}' in custom_parameters")
-                        self.tenant = new_tenant
+                    self.logger.info(f"Using tenant '{new_tenant}' from custom_parameters")
+                    self.tenant = new_tenant
+                else:
+                    self.logger.info(f"No tenant specified in custom_parameters, using default tenant '{self.tenant}'")
+                
+                self.logger.info(f"Final tenant determination: {self.tenant}")
+                
                 
                 self.logger.info(f"Stream started: stream_sid={self.stream_sid}, call_sid={self.call_sid}")
                 
