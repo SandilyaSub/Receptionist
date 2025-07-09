@@ -44,6 +44,34 @@ class TranscriptManager:
             # Removed verbose logging statements
             self.transcript_data["conversation"].append({"role": role, "text": text.strip()})
 
+    def _merge_consecutive_messages(self):
+        """Merge consecutive messages from the same role before saving."""
+        if not self.transcript_data.get("conversation"):
+            return
+            
+        merged_conversation = []
+        current_role = None
+        current_text = ""
+        
+        for message in self.transcript_data["conversation"]:
+            if message["role"] == current_role:
+                # Same role, append to current text
+                current_text += " " + message["text"]
+            else:
+                # Different role, save the previous message if it exists
+                if current_role:
+                    merged_conversation.append({"role": current_role, "text": current_text})
+                # Start a new message
+                current_role = message["role"]
+                current_text = message["text"]
+        
+        # Add the last message
+        if current_role:
+            merged_conversation.append({"role": current_role, "text": current_text})
+        
+        # Replace the conversation with the merged version
+        self.transcript_data["conversation"] = merged_conversation
+
     def get_full_transcript(self):
         """Returns the full transcript data."""
         return self.transcript_data
@@ -62,6 +90,9 @@ class TranscriptManager:
         if self.final_model_text:
             self.add_to_transcript("assistant", self.final_model_text)
             self.final_model_text = ""
+            
+        # Merge consecutive messages from the same role before saving
+        self._merge_consecutive_messages()
 
         record_id = None
         try:
