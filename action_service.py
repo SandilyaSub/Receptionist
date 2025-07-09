@@ -307,11 +307,9 @@ class ActionService:
             self.logger.error("No call_type provided for customer notification")
             return False
             
-        # Select template based on call_type
-        template_name = await self.whatsapp_service.select_template(call_type)
-        if not template_name:
-            self.logger.info(f"Skipping notification for call_type: {call_type}")
-            return False
+        # Use service_booking template directly for all customer notifications
+        template_name = "service_booking.json"
+        self.logger.info(f"Using service_booking template for customer {call_type} notification")
             
         # Gather template data
         template_data = await self.whatsapp_service.gather_template_data(
@@ -338,7 +336,7 @@ class ActionService:
             # Send using MSG91 provider
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name=template_name.split('.')[0],  # Remove .json extension
+                template_name="service_booking",  # Use service_booking template directly
                 template_data=rendered_template
             )
             self.logger.info(f"Customer notification result: {result}")
@@ -413,11 +411,14 @@ class ActionService:
         Returns:
             Dict with template components
         """
-        # For now, using a simple format - can be enhanced with tenant-specific templates
+        # Use the same format as owner template for consistency
+        # This matches the service_booking template structure
+        # The message_body is the AI-generated message from WhatsAppNotificationService.generate_ai_message
+        # It's passed through template_data['message_body'] from the render_template method
         return {
             "body": {
                 "type": "text",
-                "text": f"Thank you for your call! We've noted your {data['call_type']}. Details: {data['details']}"
+                "text": data.get("message_body", f"Thank you for your call! We've noted your {data['call_type']}. Our team will be in touch with you soon.")
             }
         }
         
