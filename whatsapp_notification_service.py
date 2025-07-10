@@ -339,58 +339,29 @@ class WhatsAppNotificationService:
     
     async def render_template(self, template_name: str, template_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Render the template with the provided data
+        Simplified template rendering that just passes through the message body
         
         Args:
-            template_name: Name of the template file
+            template_name: Name of the template file (not used in simplified version)
             template_data: Data to insert into the template
             
         Returns:
-            Dict with the rendered template or None if rendering failed
+            Dict with the template data containing message_body
         """
         try:
-            template_path = self.templates_dir / template_name
-            with open(template_path, "r") as f:
-                template_content = f.read()
+            # No need to parse template files anymore, just pass through the data
+            # The MSG91Provider will handle the proper formatting
+            
+            # Ensure message_body is never null
+            message_body = template_data.get("message_body", "")
+            if message_body is None or message_body == "":
+                message_body = "Thank you for your call. We'll be in touch soon."
                 
-            # Extract the JSON part from the curl command
-            json_start = template_content.find('{')
-            json_end = template_content.rfind('}') + 1
+            # Log the message being sent
+            self.logger.info(f"Rendering template with message: {message_body[:50]}...")
             
-            if json_start == -1 or json_end == 0:
-                self.logger.error(f"Invalid template format in {template_name}")
-                return None
-                
-            template_json = json.loads(template_content[json_start:json_end])
-            
-            # Insert phone numbers in the main template
-            template_json["to"] = template_data["phone_numbers"]
-            
-            # Access the components section
-            to_and_components = template_json["payload"]["template"]["to_and_components"]
-            if not to_and_components or len(to_and_components) == 0:
-                self.logger.error(f"Invalid template structure in {template_name}: missing to_and_components")
-                return None
-                
-            # Make sure the recipient phone number is also set in the to_and_components section
-            if template_data["phone_numbers"] and len(template_data["phone_numbers"]) > 0:
-                to_and_components[0]["to"] = template_data["phone_numbers"]
-                
-            components = to_and_components[0]["components"]
-            
-            # Update component values with the correct parameters
-            if "body_1" in components:
-                components["body_1"]["value"] = template_data.get("branch_name", "")
-            if "body_2" in components:
-                # Ensure message_body is never null
-                message_body = template_data.get("message_body", "")
-                if message_body is None:
-                    message_body = "Thank you for your call. We'll be in touch soon."
-                components["body_2"]["value"] = message_body
-            if "body_3" in components:
-                components["body_3"]["value"] = template_data.get("branch_head_phone", "")
-            
-            return template_json
+            # Just return the template data as is - MSG91Provider will extract what it needs
+            return template_data
             
         except Exception as e:
             self.logger.error(f"Error rendering template: {str(e)}")

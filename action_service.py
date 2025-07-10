@@ -311,15 +311,29 @@ class ActionService:
         template_name = "service_message.json"
         self.logger.info(f"Using service_message template for customer {call_type} notification")
             
-        # Gather template data
-        template_data = await self.whatsapp_service.gather_template_data(
-            call_sid=call_sid,
-            tenant_id=tenant_id,
+        # Generate AI message for the customer
+        ai_message = await self.whatsapp_service.generate_ai_message(
+            call_type=call_type,
             call_details=data
         )
         
+        if not ai_message:
+            self.logger.error(f"Failed to generate AI message for call_sid: {call_sid}")
+            return False
+            
+        # Log the AI-generated message
+        self.logger.info(f"AI generated message for customer: {ai_message[:50]}...")
+        
+        # Gather template data with the AI message
+        template_data = {
+            "phone_numbers": formatted_phone,
+            "message_body": ai_message  # This is the key field that will be used in the template
+        }
+        
+        self.logger.info(f"Template data prepared for customer notification")
+        
         if not template_data:
-            self.logger.error(f"Failed to gather template data for call_sid: {call_sid}")
+            self.logger.error(f"Failed to prepare template data for call_sid: {call_sid}")
             return False
             
         # Render template
@@ -384,13 +398,22 @@ class ActionService:
         if customer_phone and not str(customer_phone).startswith("91"):
             formatted_customer_phone = self._format_phone_number(customer_phone) or customer_phone
         
-        # For now, we're keeping the owner notification simple and not using the AI-generated content
-        # We could enhance this in the future to use the WhatsApp notification service as well
+        # Prepare a simple message for the owner
+        owner_message = self._prepare_owner_message(data, formatted_customer_phone, tenant_id)
+        
+        # Prepare template data with the owner message
+        template_data = {
+            "phone_numbers": formatted_phone,
+            "message_body": owner_message  # This is the key field that will be used in the template
+        }
+        
+        self.logger.info(f"Template data prepared for owner notification")
+        
         try:
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
                 template_name="service_message",
-                template_data=self._prepare_owner_template_data(data, formatted_customer_phone, tenant_id)
+                template_data=template_data
             )
             self.logger.info(f"Owner notification result: {result}")
             return result
@@ -399,6 +422,33 @@ class ActionService:
             if return_exceptions:
                 return e
             raise  # Re-raise for retry mechanism
+        
+    def _prepare_owner_message(self, call_details: Dict[str, Any], customer_phone: str, tenant_id: str) -> str:
+        """
+        Prepare a simple message for owner notification
+        
+        Args:
+            call_details: Call details from the database
+            customer_phone: Customer phone number
+            tenant_id: Tenant ID
+            
+        Returns:
+            String with the message for the owner
+        """
+        # Create a simple message with the call details
+        call_type = call_details.get('call_type', 'Unknown')
+        call_duration = call_details.get('call_duration', 'Unknown')
+        
+        # Extract any critical details if available
+        critical_details = ""
+        if 'critical_call_details' in call_details and call_details['critical_call_details']:
+            critical_details = "\n\nDetails: " + call_details['critical_call_details']
+        
+        # Format the message
+        message = f"📞 New {call_type} call received from {customer_phone}\n"
+        message += f"⏱️ Duration: {call_duration} seconds{critical_details}"
+        
+        return message
         
     def _prepare_customer_template_data(self, data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         """
@@ -419,27 +469,6 @@ class ActionService:
             "body": {
                 "type": "text",
                 "text": data.get("message_body", f"Thank you for your call! We've noted your {data['call_type']}. Our team will be in touch with you soon.")
-            }
-        }
-        
-    def _prepare_owner_template_data(self, data: Dict[str, Any], 
-                                    customer_phone: str, tenant_id: str) -> Dict[str, Any]:
-        """
-        Prepare template data for owner message
-        
-        Args:
-            data: Message data (call_type, details)
-            customer_phone: Customer's phone number
-            tenant_id: The tenant identifier
-            
-        Returns:
-            Dict with template components
-        """
-        # For now, using a simple format - can be enhanced with tenant-specific templates
-        return {
-            "body": {
-                "type": "text",
-                "text": f"New {data['call_type']} from {customer_phone}. Details: {data['details']}"
             }
         }
         

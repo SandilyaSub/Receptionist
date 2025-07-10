@@ -38,7 +38,7 @@ class MSG91Provider:
         Args:
             to_number: Recipient phone number (E.164 format)
             template_name: Name of the WhatsApp template to use
-            template_data: Template data/components
+            template_data: Template data containing message_body
             
         Returns:
             bool: True if message was sent successfully, False otherwise
@@ -52,6 +52,13 @@ class MSG91Provider:
             "authkey": self.auth_key
         }
         
+        # Extract message body from template data
+        message_body = template_data.get("message_body", "")
+        if not message_body:
+            self.logger.warning(f"No message_body provided for template {template_name}")
+            message_body = "Thank you for your inquiry. We'll be in touch soon."
+            
+        # Construct payload with the exact structure that works in curl command
         payload = {
             "integrated_number": self.integrated_number,
             "content_type": "template",
@@ -64,11 +71,16 @@ class MSG91Provider:
                         "code": "en",
                         "policy": "deterministic"
                     },
-                    "namespace": "1c102e3c_6aea_4360_95a3_5d81885a477e",
+                    "namespace": "2e1d8662_869f_48e9_bb1f_5f995acb2c20", # Updated namespace from service_message.json
                     "to_and_components": [
                         {
                             "to": [to_number],
-                            "components": template_data
+                            "components": {
+                                "body_1": {
+                                    "type": "text",
+                                    "value": message_body
+                                }
+                            }
                         }
                     ]
                 }
