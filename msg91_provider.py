@@ -54,6 +54,19 @@ class MSG91Provider:
         
         # Extract message body from template data
         message_body = template_data.get("message_body", "")
+        
+        # Ensure message_body is a string, not a dictionary
+        if isinstance(message_body, dict):
+            self.logger.warning(f"message_body is a dictionary, converting to string: {message_body}")
+            try:
+                # Try to convert dict to a formatted string
+                import json
+                message_body = json.dumps(message_body, indent=2)
+            except Exception as e:
+                self.logger.error(f"Error converting dict to string: {str(e)}")
+                # Fallback to simple string conversion
+                message_body = str(message_body)
+                
         if not message_body:
             self.logger.warning(f"No message_body provided for template {template_name}")
             message_body = "Thank you for your inquiry. We'll be in touch soon."
