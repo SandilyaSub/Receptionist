@@ -314,7 +314,7 @@ class ActionService:
         # Generate AI message for the customer
         ai_message = await self.whatsapp_service.generate_ai_message(
             call_type=call_type,
-            call_details=data
+            critical_call_details=data
         )
         
         if not ai_message:
