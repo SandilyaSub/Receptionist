@@ -307,9 +307,9 @@ class ActionService:
             self.logger.error("No call_type provided for customer notification")
             return False
             
-        # Use service_booking template directly for all customer notifications
-        template_name = "service_booking.json"
-        self.logger.info(f"Using service_booking template for customer {call_type} notification")
+        # Use service_message template directly for all customer notifications
+        template_name = "service_message.json"
+        self.logger.info(f"Using service_message template for customer {call_type} notification")
             
         # Gather template data
         template_data = await self.whatsapp_service.gather_template_data(
@@ -336,7 +336,7 @@ class ActionService:
             # Send using MSG91 provider
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name="service_booking",  # Use service_booking template directly
+                template_name="service_message",  # Use service_message template directly
                 template_data=rendered_template
             )
             self.logger.info(f"Customer notification result: {result}")
@@ -389,7 +389,7 @@ class ActionService:
         try:
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name="service_booking",
+                template_name="service_message",
                 template_data=self._prepare_owner_template_data(data, formatted_customer_phone, tenant_id)
             )
             self.logger.info(f"Owner notification result: {result}")
@@ -412,7 +412,7 @@ class ActionService:
             Dict with template components
         """
         # Use the same format as owner template for consistency
-        # This matches the service_booking template structure
+        # This matches the service_message template structure
         # The message_body is the AI-generated message from WhatsAppNotificationService.generate_ai_message
         # It's passed through template_data['message_body'] from the render_template method
         return {
