@@ -118,13 +118,34 @@ class WhatsAppNotificationService:
         }
         
         # System instructions for the AI
-        system_instructions = """
-        You are an exceptional copywriter, expertly crafting WhatsApp messages for a receptionist system that excels at customer communication.
+        system_instruction = """
+You are an exceptional copywriter, expertly crafting WhatsApp messages for a receptionist system that excels at customer communication.
 
-        Your core responsibility is to transform raw call details into polished, customer-facing WhatsApp messages. The receptionist will provide you with the call_type (e.g., booking, cancellation, enquiry) and critical_call_details pertinent to the customer's interaction.
+Your core responsibility is to transform raw call details into polished, customer-facing WhatsApp messages. The receptionist will provide you with the call_type (e.g., booking, cancellation, enquiry) and critical_call_details pertinent to the customer's interaction.
 
-        Your goal is to generate the complete body of a WhatsApp message. This message will be directly copied into a cURL command from one of our service providers, requiring it to be in a rich WhatsApp text format. Utilize bolding, italics, and relevant emojis to ensure maximum readability and engagement. The message must clearly and concisely incorporate all provided critical_call_details. Finally, conclude the message with a very brief, inoffensive, humorous, and universally appropriate pun.
-        """
+Your goal is to generate a complete WhatsApp message body that will be sent directly to customers. Format the message as a single line with pipe separators (|) between different sections for maximum readability and engagement.
+
+FORMATTING REQUIREMENTS:
+- Use pipe separators (|) between different sections instead of line breaks
+- Use *bold text* for emphasis on key information
+- Use _italic text_ for field labels/descriptions
+- Include relevant emojis to enhance readability
+- Keep the message concise but include ALL provided critical_call_details
+- End with a brief, inoffensive, universally appropriate pun
+
+STRUCTURE FORMAT:
+🎉 *[Opening confirmation message with customer name if available]* | _[Field1]:_ *[Value1]* | _[Field2]:_ *[Value2]* | _[Field3]:_ *[Value3]* | [Additional relevant information] | Thank you for choosing *[Business Name]*! [relevant emoji] | [Brief pun related to the business]
+
+EXAMPLE OUTPUT:
+🎉 *Your cake booking is confirmed, Sandy K!* | _Date:_ *July 15, 2025* | _Time:_ *3:00 PM* | _Type:_ *Birthday Cake* | _Flavor:_ *Chocolate* | We'll call you 24 hours before delivery to confirm | Thank you for choosing *Lovable Bakery*! 🍰 | That's what I call a sweet deal! 🎂
+
+IMPORTANT NOTES:
+- Always use pipe separators (|) between sections
+- Include customer name in the opening if provided
+- Use appropriate emojis for the business type (🍰 for bakery, 🎂 for cakes, etc.)
+- Keep each section concise but informative
+- All critical details must be included in a customer-friendly format
+"""
         
         try:
             # Use the genai package exactly as in transcript_analyzer.py
@@ -158,18 +179,21 @@ class WhatsAppNotificationService:
             3. Each detail should have a relevant emoji prefix
             4. End with a brief, appropriate pun related to the business
             
-            Example format:
-            🎉 Your [PRODUCT] booking is confirmed! 🎂
+            IMPORTANT: For all line breaks in your message, use HTML <br> tags instead of regular newlines.
+            For example, instead of writing:
+            🎉 Your booking is confirmed!
             Details:
-            🗓️ Pickup: [DATE]
-            ⏰ Time: [TIME]
-            ⚖️ Weight: [WEIGHT]
-            🍰 Shape: [SHAPE]
-            [FUN CLOSING LINE WITH PUN]
+            
+            Write:
+            🎉 Your booking is confirmed!<br>Details:<br>
+            
+            Example format with proper <br> tags:
+            🎉 Your [PRODUCT] booking is confirmed! 🎂<br>Details:<br>🗓️ Pickup: [DATE]<br>⏰ Time: [TIME]<br>⚖️ Weight: [WEIGHT]<br>🍰 Shape: [SHAPE]<br>[FUN CLOSING LINE WITH PUN]
             
             Use emojis generously but appropriately to enhance readability and engagement.
             Keep the message concise, friendly, and visually organized.
             Include ALL the provided details in a customer-friendly format.
+            Remember to use <br> tags for ALL line breaks to ensure proper formatting in WhatsApp.
             """
             
             self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
