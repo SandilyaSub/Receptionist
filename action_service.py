@@ -398,21 +398,37 @@ class ActionService:
         if customer_phone and not str(customer_phone).startswith("91"):
             formatted_customer_phone = self._format_phone_number(customer_phone) or customer_phone
         
-        # Prepare a simple message for the owner
-        owner_message = self._prepare_owner_message(data, formatted_customer_phone, tenant_id)
+        # Get call type and critical call details
+        call_type = data.get("call_type", "Unknown")
+        critical_call_details = data.get("critical_call_details", {})
         
-        # Prepare template data with the owner message
+        # Extract summary from critical call details
+        summary = ""
+        if isinstance(critical_call_details, dict) and "summary" in critical_call_details:
+            summary = critical_call_details.get("summary", "")
+        
+        # Format critical call details as pipe-separated key-value pairs
+        formatted_details = self._format_critical_details_for_owner(critical_call_details)
+        
+        # Prepare template data for owner_message template
+        # var1: Customer phone number
+        # var2: Call type
+        # var3: Summary
+        # var4: Pipe-separated key-value pairs from critical_call_details
         template_data = {
             "phone_numbers": formatted_phone,
-            "message_body": owner_message  # This is the key field that will be used in the template
+            "var1": formatted_customer_phone,
+            "var2": call_type,
+            "var3": summary,
+            "var4": formatted_details
         }
         
-        self.logger.info(f"Template data prepared for owner notification")
+        self.logger.info(f"Template data prepared for owner notification using owner_message template")
         
         try:
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name="service_message",
+                template_name="owner_message",
                 template_data=template_data
             )
             self.logger.info(f"Owner notification result: {result}")
@@ -449,6 +465,44 @@ class ActionService:
         message += f"⏱️ Duration: {call_duration} seconds{critical_details}"
         
         return message
+        
+    def _format_critical_details_for_owner(self, critical_call_details: Dict[str, Any]) -> str:
+        """
+        Format critical call details as pipe-separated key-value pairs for owner notification
+        
+        Args:
+            critical_call_details: Critical call details from the analyzer
+            
+        Returns:
+            String with pipe-separated key-value pairs
+        """
+        if not critical_call_details or not isinstance(critical_call_details, dict):
+            return "No details available"
+            
+        # Filter out summary as it's already included in var3
+        filtered_details = {k: v for k, v in critical_call_details.items() if k != "summary"}
+        
+        if not filtered_details:
+            return "No additional details available"
+            
+        # Format as pipe-separated key-value pairs
+        formatted_pairs = []
+        for key, value in filtered_details.items():
+            # Format key with title case and replace underscores with spaces
+            formatted_key = key.replace("_", " ").title()
+            
+            # Handle different value types
+            if isinstance(value, (list, tuple)):
+                formatted_value = ", ".join(str(item) for item in value)
+            elif isinstance(value, dict):
+                nested_pairs = [f"{k}: {v}" for k, v in value.items()]
+                formatted_value = ", ".join(nested_pairs)
+            else:
+                formatted_value = str(value)
+                
+            formatted_pairs.append(f"{formatted_key}: {formatted_value}")
+            
+        return " | ".join(formatted_pairs)
         
     def _prepare_customer_template_data(self, data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         """

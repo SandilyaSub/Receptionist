@@ -7,6 +7,8 @@ This module handles the integration with MSG91 API for sending WhatsApp messages
 import json
 import logging
 import aiohttp
+import traceback
+import re
 from typing import Dict, Any, Optional
 
 class MSG91Provider:
@@ -26,12 +28,14 @@ class MSG91Provider:
         self.api_url = "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/"
         self.logger = logger or logging.getLogger(__name__)
         
+        # No longer needed as AI generates messages with <br> tags
+        
         # Validate initialization
         if not auth_key:
             self.logger.warning("MSG91 provider initialized without auth_key")
         
     async def send_message(self, to_number: str, template_name: str, 
-                          template_data: Dict[str, Any]) -> bool:
+                          template_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send WhatsApp message via MSG91
         
@@ -41,11 +45,21 @@ class MSG91Provider:
             template_data: Template data containing message_body
             
         Returns:
-            bool: True if message was sent successfully, False otherwise
+            Dict[str, Any]: Response object with status, message, and data
+                {
+                    'status': 'success'|'error',
+                    'message': str,  # Human-readable message
+                    'data': Any      # Additional response data if any
+                }
         """
         if not self.auth_key:
-            self.logger.error("Cannot send message: MSG91_AUTH_KEY not configured")
-            return False
+            error_msg = "Cannot send message: MSG91_AUTH_KEY not configured"
+            self.logger.error(error_msg)
+            return {
+                'status': 'error',
+                'message': error_msg,
+                'data': None
+            }
             
         headers = {
             "Content-Type": "application/json",
@@ -60,7 +74,6 @@ class MSG91Provider:
             self.logger.warning(f"message_body is a dictionary, converting to string: {message_body}")
             try:
                 # Try to convert dict to a formatted string
-                import json
                 message_body = json.dumps(message_body, indent=2)
             except Exception as e:
                 self.logger.error(f"Error converting dict to string: {str(e)}")
@@ -70,6 +83,9 @@ class MSG91Provider:
         if not message_body:
             self.logger.warning(f"No message_body provided for template {template_name}")
             message_body = "Thank you for your inquiry. We'll be in touch soon."
+            
+        # AI now generates messages with <br> tags for line breaks
+        # No formatting needed here
             
         # Construct payload with the exact structure that works in curl command
         payload = {
@@ -88,12 +104,7 @@ class MSG91Provider:
                     "to_and_components": [
                         {
                             "to": [to_number],
-                            "components": {
-                                "body_1": {
-                                    "type": "text",
-                                    "value": message_body
-                                }
-                            }
+                            "components": self._prepare_template_components(template_name, template_data)
                         }
                     ]
                 }
@@ -119,14 +130,87 @@ class MSG91Provider:
                     
                     if response.status != 200:
                         self.logger.error(f"MSG91 API error: {result}")
-                        return False
+                        return {
+                            'status': 'error',
+                            'message': f"MSG91 API error: {result}",
+                            'data': None
+                        }
                     
-                    self.logger.info(f"Message sent to {to_number}, result: {result}")
-                    return True
+                    success_msg = f"Message sent successfully to {to_number}"
+                    self.logger.info(success_msg)
+                    return {
+                        'status': 'success',
+                        'message': success_msg,
+                        'data': result
+                    }
                     
         except aiohttp.ClientError as e:
             self.logger.error(f"MSG91 API connection error: {str(e)}")
-            return False
+            return {
+                'status': 'error',
+                'message': f"MSG91 API connection error: {str(e)}",
+                'data': None
+            }
         except Exception as e:
-            self.logger.error(f"Error sending MSG91 message: {str(e)}")
-            return False
+            error_msg = f"Error sending MSG91 message: {str(e)}"
+            self.logger.error(error_msg)
+            self.logger.error(f"Exception traceback: {traceback.format_exc()}")
+            return {
+                'status': 'error',
+                'message': error_msg,
+                'data': {'exception': str(e), 'traceback': traceback.format_exc()}
+            }
+            
+    def _prepare_template_components(self, template_name: str, template_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Prepare template components based on template name
+        
+        Args:
+            template_name: Name of the template (e.g., 'service_message', 'owner_message')
+            template_data: Template data with variables
+            
+        Returns:
+            Dict with components formatted for the specific template
+        """
+        if template_name == "owner_message":
+            # For owner_message template with 4 variables
+            return {
+                "body_1": {
+                    "type": "text",
+                    "value": template_data.get("var1", "")  # Customer phone
+                },
+                "body_2": {
+                    "type": "text",
+                    "value": template_data.get("var2", "")  # Call type
+                },
+                "body_3": {
+                    "type": "text",
+                    "value": template_data.get("var3", "")  # Summary
+                },
+                "body_4": {
+                    "type": "text",
+                    "value": template_data.get("var4", "")  # Pipe-separated key-value pairs
+                }
+            }
+        else:
+            # Default for service_message template with 1 variable
+            message_body = template_data.get("message_body", "")
+            
+            # Ensure message_body is a string, not a dictionary
+            if isinstance(message_body, dict):
+                self.logger.warning(f"message_body is a dictionary, converting to string: {message_body}")
+                try:
+                    # Try to convert dict to a formatted string
+                    message_body = json.dumps(message_body, indent=2)
+                except Exception as e:
+                    self.logger.error(f"Error converting dict to string: {str(e)}")
+                    # Fallback to simple string conversion
+                    message_body = str(message_body)
+            
+            return {
+                "body_1": {
+                    "type": "text",
+                    "value": message_body
+                }
+            }
+    # _format_whatsapp_message method removed as AI now generates messages with <br> tags
