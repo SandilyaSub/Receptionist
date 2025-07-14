@@ -28,7 +28,7 @@ class MSG91Provider:
         self.api_url = "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/"
         self.logger = logger or logging.getLogger(__name__)
         
-        # No longer needed as AI generates messages with <br> tags
+        # We need to convert pipe-separated messages to proper WhatsApp formatting
         
         # Validate initialization
         if not auth_key:
@@ -213,4 +213,4 @@ class MSG91Provider:
                     "value": message_body
                 }
             }
-    # _format_whatsapp_message method removed as AI now generates messages with <br> tags
+    # _format_whatsapp_message method removed as we now handle pipe-to-newline conversion in send_message

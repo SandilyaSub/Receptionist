@@ -1,9 +1,9 @@
 curl --location --request POST
   'https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/'
   --header 'Content-Type: application/json'
-  --header 'authkey: "<MSG91_AUTH_KEY>"
+  --header 'authkey: <authkey>'
   --data-raw '{
-    "integrated_number": "<MSG91_INTEGRATED_NUMBER>",
+    "integrated_number": "917892272123",
     "content_type": "template",
     "payload": {
         "messaging_product": "whatsapp",
@@ -18,12 +18,12 @@ curl --location --request POST
             "to_and_components": [
                 {
                     "to": [
-                        "<PHONE_NUMBER>"
+                        "<list_of_phone_numbers>"
                     ],
                     "components": {
                         "body_1": {
                             "type": "text",
-                            "value": "<MESSAGE>"
+                            "value": "value1"
                         }
                     }
                 }
