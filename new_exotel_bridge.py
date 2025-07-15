@@ -97,6 +97,7 @@ class TranscriptManager:
         record_id = None
         try:
             # Step 1: Insert the initial transcript data
+            # Note: We don't include an 'id' field - let Supabase auto-generate it
             data_to_insert = {
                 "session_id": self.session_id,
                 "tenant": self.tenant,
@@ -1193,8 +1194,9 @@ class GeminiSession:
                     return
 
                 # Prepare data for Supabase
+                # Note: We don't include an 'id' field - let Supabase auto-generate it
                 data_to_insert = {
-                    "call_sid": call_details.get("Sid"),
+                    "call_sid": self.call_sid,
                     "from_number": call_details.get("From"),
                     "to_number": call_details.get("To"),
                     "status": call_details.get("Status"),
