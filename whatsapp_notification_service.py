@@ -370,9 +370,8 @@ EXAMPLE OUTPUT:
         # Use the class attribute for system instruction defined in __init__
         self.logger.info("Using 4-component labeled format for customer notification")        
         try:
-            # Use the genai package exactly as in transcript_analyzer.py
+            # Use the genai package with the correct syntax
             client = genai.Client(api_key=GEMINI_API_KEY)
-            model = client.get_model("gemini-2.5-flash")
             
             # Prepare details string for the prompt
             details_str = ""
@@ -402,32 +401,25 @@ EXAMPLE OUTPUT:
                 "max_output_tokens": 1024,
             }
             
-            # Create the chat session with our system instruction
-            chat = model.start_chat(
-                history=[
-                    {
-                        "role": "user",
-                        "parts": [{"text": self.ai_system_instruction}]
-                    },
-                    {
-                        "role": "model", 
-                        "parts": [{"text": "I understand my role as a copywriter creating WhatsApp messages for a receptionist AI system. I'll generate 4 distinct components for each message following the structure and guidelines you've provided."}]
-                    }
-                ]
-            )
+            # Combine system instruction and prompt in a single call
+            combined_prompt = f"{self.ai_system_instruction}\n\n{prompt}"
             
-            # Send the prompt and get the response
-            response = chat.send_message(prompt)
+            # Send the combined prompt to Gemini
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=combined_prompt,
+                generation_config=generation_config
+            )
             
             self.logger.info(f"Raw Gemini API response: {response}")
             
-            if not hasattr(response, 'text'):
-                raise ValueError("Invalid response from Gemini API: missing 'text' attribute")
+            # Extract text from the response
+            response_text = response.text
                     
-            self.logger.info(f"AI generated message: {response.text}")
+            self.logger.info(f"AI generated message: {response_text}")
             
             # Parse the labeled components
-            message_components = self.parse_labeled_components(response.text)
+            message_components = self.parse_labeled_components(response_text)
             
             # Validate and provide defaults for missing components
             message_components = self.validate_message_components(message_components)
