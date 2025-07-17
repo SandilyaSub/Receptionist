@@ -393,23 +393,37 @@ EXAMPLE OUTPUT:
             
             self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
             
-            # Configure the generation parameters
-            generation_config = {
-                "temperature": 0.7,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 1024,
-            }
-            
-            # Combine system instruction and prompt in a single call
-            combined_prompt = f"{self.ai_system_instruction}\n\n{prompt}"
-            
-            # Send the combined prompt to Gemini
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=combined_prompt,
-                generation_config=generation_config
-            )
+            # Configure the generation parameters using the proper types.GenerateContentConfig
+            # Set up system instruction and generation config
+            try:
+                # Create proper configuration according to Gemini API documentation
+                config = types.GenerateContentConfig(
+                    temperature=0.7,
+                    top_p=0.95,
+                    top_k=40,
+                    max_output_tokens=1024,
+                    system_instruction=self.ai_system_instruction
+                )
+                
+                # Send the prompt to Gemini with proper configuration
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=config
+                )
+            except Exception as e:
+                self.logger.error(f"Error during Gemini API call configuration: {str(e)}")
+                # Fallback to simpler configuration if the above fails
+                config = types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=1024,
+                )
+                
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=f"{self.ai_system_instruction}\n\n{prompt}",
+                    config=config
+                )
             
             self.logger.info(f"Raw Gemini API response: {response}")
             
