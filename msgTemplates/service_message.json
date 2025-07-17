@@ -24,6 +24,18 @@ curl --location --request POST
                         "body_1": {
                             "type": "text",
                             "value": "value1"
+                        },
+                        "body_2": {
+                            "type": "text",
+                            "value": "value1"
+                        },
+                        "body_3": {
+                            "type": "text",
+                            "value": "value1"
+                        },
+                        "body_4": {
+                            "type": "text",
+                            "value": "value1"
                         }
                     }
                 }

@@ -193,24 +193,108 @@ class MSG91Provider:
                 }
             }
         else:
-            # Default for service_message template with 1 variable
-            message_body = template_data.get("message_body", "")
+            # Default for service_message template with 4 variables
+            message_body = template_data.get("message_body", {})
             
-            # Ensure message_body is a string, not a dictionary
-            if isinstance(message_body, dict):
-                self.logger.warning(f"message_body is a dictionary, converting to string: {message_body}")
+            # Handle the case where message_body is already a dictionary with the 4 components
+            if isinstance(message_body, dict) and all(key in message_body for key in ["body_1", "body_2", "body_3", "body_4"]):
+                self.logger.info("Using structured 4-component message format")
+                return {
+                    "body_1": {
+                        "type": "text",
+                        "value": message_body.get("body_1", "there")
+                    },
+                    "body_2": {
+                        "type": "text",
+                        "value": message_body.get("body_2", "Thank you for your inquiry.")
+                    },
+                    "body_3": {
+                        "type": "text",
+                        "value": message_body.get("body_3", "We've received your message and will follow up shortly.")
+                    },
+                    "body_4": {
+                        "type": "text",
+                        "value": message_body.get("body_4", "We look forward to serving you soon!")
+                    }
+                }
+            
+            # Handle the case where message_body is a string that might be JSON
+            if isinstance(message_body, str) and message_body.strip().startswith('{'):
                 try:
-                    # Try to convert dict to a formatted string
+                    # Try to parse as JSON
+                    parsed_body = json.loads(message_body)
+                    if isinstance(parsed_body, dict) and all(key in parsed_body for key in ["body_1", "body_2", "body_3", "body_4"]):
+                        self.logger.info("Parsed message_body string as JSON with 4 components")
+                        return {
+                            "body_1": {
+                                "type": "text",
+                                "value": parsed_body.get("body_1", "there")
+                            },
+                            "body_2": {
+                                "type": "text",
+                                "value": parsed_body.get("body_2", "Thank you for your inquiry.")
+                            },
+                            "body_3": {
+                                "type": "text",
+                                "value": parsed_body.get("body_3", "We've received your message and will follow up shortly.")
+                            },
+                            "body_4": {
+                                "type": "text",
+                                "value": parsed_body.get("body_4", "We look forward to serving you soon!")
+                            }
+                        }
+                except json.JSONDecodeError:
+                    self.logger.warning("Failed to parse message_body as JSON, using fallback")
+            
+            # Fallback for backward compatibility or error cases
+            self.logger.warning("Using fallback 4-component message format")
+            
+            # Convert message_body to string if it's a dict but not in the expected format
+            if isinstance(message_body, dict):
+                try:
                     message_body = json.dumps(message_body, indent=2)
                 except Exception as e:
                     self.logger.error(f"Error converting dict to string: {str(e)}")
-                    # Fallback to simple string conversion
                     message_body = str(message_body)
             
+            # If message_body is a string, use it as body_3 (the main content)
+            if isinstance(message_body, str):
+                return {
+                    "body_1": {
+                        "type": "text",
+                        "value": "there"
+                    },
+                    "body_2": {
+                        "type": "text",
+                        "value": "Thank you for your inquiry."
+                    },
+                    "body_3": {
+                        "type": "text",
+                        "value": message_body or "We've received your message and will follow up shortly."
+                    },
+                    "body_4": {
+                        "type": "text",
+                        "value": "We look forward to serving you soon!"
+                    }
+                }
+            
+            # Final fallback with empty values
             return {
                 "body_1": {
                     "type": "text",
-                    "value": message_body
+                    "value": "there"
+                },
+                "body_2": {
+                    "type": "text",
+                    "value": "Thank you for your inquiry."
+                },
+                "body_3": {
+                    "type": "text",
+                    "value": "We've received your message and will follow up shortly."
+                },
+                "body_4": {
+                    "type": "text",
+                    "value": "We look forward to serving you soon!"
                 }
             }
     # _format_whatsapp_message method removed as we now handle pipe-to-newline conversion in send_message

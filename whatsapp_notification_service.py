@@ -48,32 +48,83 @@ class WhatsAppNotificationService:
             
         # Define the system instructions for the AI as a class attribute
         self.ai_system_instruction = """
-You are an exceptional copywriter, expertly crafting WhatsApp messages for a receptionist system that excels at customer communication.
+You are an exceptional copywriter creating WhatsApp messages for a receptionist AI system. Your role is to transform call details into engaging, customer-friendly WhatsApp message components.
 
-Your core responsibility is to transform raw call details into polished, customer-facing WhatsApp messages. The receptionist will provide you with the call_type (e.g., booking, cancellation, enquiry) and critical_call_details pertinent to the customer's interaction.
+You will receive call_type and critical_call_details from customer interactions. Your task is to generate content for a 4-component WhatsApp template structure that creates delightful, personality-rich messages.
 
-Your goal is to generate a complete WhatsApp message body that will be sent directly to customers. Format the message as a single line with pipe separators (|) between different sections for maximum readability and engagement.
+COMPONENT STRUCTURE:
+The message follows this format:
+"Hi {{body_1}}! 👋
 
-FORMATTING REQUIREMENTS:
-- Use pipe separators (|) between different sections instead of line breaks
-- Use *bold text* for emphasis on key information
-- Use _italic text_ for field labels/descriptions
-- Include relevant emojis to enhance readability
-- Keep the message concise but include ALL provided critical_call_details
-- End with a brief, inoffensive, universally appropriate pun
+{{body_2}}
 
-STRUCTURE FORMAT:
-🎉 *[Opening confirmation message with customer name if available]* | _[Field1]:_ *[Value1]* | _[Field2]:_ *[Value2]* | _[Field3]:_ *[Value3]* | [Additional relevant information] | Thank you for choosing *[Business Name]*! [relevant emoji] | [Brief pun related to the business]
+{{body_3}}
+
+{{body_4}}
+
+Thanks for choosing us! 🙏
+
+Regards,
+Aarohi ( helllo.ai )"
+
+YOUR TASK:
+Generate a JSON response with exactly 4 components:
+
+{
+  "body_1": "Customer name or appropriate greeting",
+  "body_2": "Context acknowledgment with appropriate emoji",
+  "body_3": "Key details/confirmation/next steps",
+  "body_4": "Closing message with personality and relevant emoji"
+}
+
+COMPONENT GUIDELINES:
+
+body_1: 
+- Use customer name if available in critical_call_details
+- If no name, use "there" or appropriate greeting
+- Just the name/greeting, no additional text
+
+body_2:
+- Acknowledge the call context with enthusiasm
+- Include 1-2 relevant emojis
+- Keep it conversational and warm
+- Examples: "Just confirmed your cake order - 2 delicious treats coming your way! 🎂", "Thanks for your interest in our digital wedding invitations! 💌"
+
+body_3:
+- Include ALL critical details from the call
+- Format key information clearly
+- Use specific details like dates, times, prices, quantities
+- Be comprehensive but concise
+- Examples: "1kg Dutch Truffle (round) + 0.5kg Butterscotch (square), both eggless. Ready tomorrow at 6 PM!", "2D invitations: ₹1,500-₹2,900 | 3D with caricatures: ₹3,500-₹4,500. 1-day delivery!"
+
+body_4:
+- Personality-driven closing message
+- Include relevant emoji
+- Match the business context
+- Create anticipation or warmth
+- Examples: "We'll have your birthday surprises ready! See you tomorrow! ✨", "Ready to make your special day unforgettable? 🎉"
+
+IMPORTANT RULES:
+- Always return valid JSON with exactly these 4 keys
+- No newlines within component values
+- Include relevant emojis but don't overuse them
+- Match tone to business type (playful for bakery, elegant for invitations, professional for medical)
+- ALL critical details must be included in body_3
+- Keep messages warm, engaging, and professional
+
+BUSINESS CONTEXT ADAPTATION:
+- Bakery: Use food emojis (🎂🍰🧁), warm language about treats and celebrations
+- Joy Invite: Use celebration emojis (💕🎉💌), romantic/festive language
+- Medical: Use professional emojis (🏥🩺), caring but professional tone
+- General: Adapt emoji and tone to context
 
 EXAMPLE OUTPUT:
-🎉 *Your cake booking is confirmed, Sandy K!* | _Date:_ *July 15, 2025* | _Time:_ *3:00 PM* | _Type:_ *Birthday Cake* | _Flavor:_ *Chocolate* | We'll call you 24 hours before delivery to confirm | Thank you for choosing *Lovable Bakery*! 🍰 | That's what I call a sweet deal! 🎂
-
-IMPORTANT NOTES:
-- Always use pipe separators (|) between sections
-- Include customer name in the opening if provided
-- Use appropriate emojis for the business type (🍰 for bakery, 🎂 for cakes, etc.)
-- Keep each section concise but informative
-- All critical details must be included in a customer-friendly format
+{
+  "body_1": "Sandy",
+  "body_2": "Just confirmed your cake order - 2 delicious treats coming your way! 🎂",
+  "body_3": "1kg Dutch Truffle (round) + 0.5kg Butterscotch (square), both eggless as requested. Ready for pickup tomorrow at 6 PM sharp!",
+  "body_4": "We'll have your birthday surprises wrapped and ready! See you tomorrow! ✨"
+}
 """
     
     async def select_template(self, call_type: str) -> Optional[str]:
@@ -128,7 +179,7 @@ IMPORTANT NOTES:
             self.logger.error(f"Error fetching tenant config: {str(e)}")
             return {}
     
-    async def generate_ai_message(self, call_type: str, critical_call_details: Dict[str, Any]) -> str:
+    async def generate_ai_message(self, call_type: str, critical_call_details: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate WhatsApp message using Gemini Flash 2.5
         
@@ -137,7 +188,7 @@ IMPORTANT NOTES:
             critical_call_details: Details extracted from the call
             
         Returns:
-            AI-generated message text or error message
+            AI-generated message components as a dictionary or error message
         """
         if not GEMINI_API_KEY:
             self.logger.error("Cannot generate message: GEMINI_API_KEY not configured")
@@ -148,7 +199,7 @@ IMPORTANT NOTES:
         }
         
         # Use the class attribute for system instruction defined in __init__
-        self.logger.info("Using pipe-separated message format for customer notification")        
+        self.logger.info("Using 4-component JSON format for customer notification")        
         try:
             # Use the genai package exactly as in transcript_analyzer.py
             client = genai.Client(api_key=GEMINI_API_KEY)
@@ -162,15 +213,17 @@ IMPORTANT NOTES:
                 for key, value in input_data['critical_call_details'].items():
                     details_str += f"{key}: {value}\n"
             
-            # Create a more structured prompt with clear instructions for formatting and style
+            # Create a structured prompt that explicitly asks for the 4-component JSON format
             prompt = f"""
             Create a WhatsApp notification message for a {input_data.get('call_type', 'Unknown')} call with the following details:
             
             {details_str}
+            
+            Remember to return your response as a valid JSON object with exactly four components (body_1, body_2, body_3, body_4) as specified in the system instructions.
             """
             
             # Use the class attribute for system instruction
-            self.logger.info("Using pipe-separated message format for customer notification")
+            self.logger.info("Using 4-component JSON format for customer notification")
             
             
             self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
@@ -233,7 +286,41 @@ IMPORTANT NOTES:
                     raise ValueError("Invalid response from Gemini API: missing 'text' attribute")
                     
                 self.logger.info(f"AI generated message: {response.text}")
-                return response.text.strip()
+                
+                # Try to parse the response as JSON
+                try:
+                    message_components = json.loads(response.text.strip())
+                    
+                    # Validate that all required components are present
+                    required_components = ["body_1", "body_2", "body_3", "body_4"]
+                    missing_components = [comp for comp in required_components if comp not in message_components]
+                    
+                    if missing_components:
+                        self.logger.warning(f"Missing components in AI response: {missing_components}")
+                        # Add default values for missing components
+                        for comp in missing_components:
+                            if comp == "body_1":
+                                message_components[comp] = "there"
+                            elif comp == "body_2":
+                                message_components[comp] = "Thank you for your inquiry."
+                            elif comp == "body_3":
+                                message_components[comp] = "We've received your message and will follow up shortly."
+                            elif comp == "body_4":
+                                message_components[comp] = "We look forward to serving you soon!"
+                    
+                    self.logger.info(f"Generated message components: {json.dumps(message_components, indent=2)}")
+                    return message_components
+                    
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to parse AI response as JSON: {str(e)}")
+                    self.logger.error(f"Raw response: {response.text}")
+                    # Return default message components
+                    return {
+                        "body_1": "there",
+                        "body_2": "Thank you for your inquiry.",
+                        "body_3": "We've received your message and will follow up shortly.",
+                        "body_4": "We look forward to serving you soon!"
+                    }
                 
             except Exception as api_error:
                 self.logger.error(f"Error in Gemini API call: {str(api_error)}")
@@ -243,7 +330,12 @@ IMPORTANT NOTES:
             self.logger.error(f"Error generating AI message: {str(e)}")
             self.logger.exception("Full exception details:")
             # Fallback message in case of error
-            return "Thank you for your call. We'll be in touch soon."
+            return {
+                "body_1": "there",
+                "body_2": "Thank you for your inquiry.",
+                "body_3": "We've received your message and will follow up shortly.",
+                "body_4": "We look forward to serving you soon!"
+            }
     
     def format_phone_number(self, phone: str) -> str:
         """
@@ -324,13 +416,11 @@ IMPORTANT NOTES:
             message_body = await self.generate_ai_message(call_type, critical_call_details)
             
             # Format the template data according to MSG91 WhatsApp template requirements
-            # body_1.value = branch_name from tenant_configs
-            # body_2.value = AI-generated message body
-            # body_3.value = branch_head_phone_number from tenant_configs
+            # The message_body now contains a dictionary with body_1, body_2, body_3, body_4 components
             return {
                 "phone_numbers": [customer_phone],
                 "branch_name": branch_name,
-                "message_body": message_body,
+                "message_body": message_body,  # This is now a dictionary with the 4 components
                 "branch_head_phone": branch_head_phone
             }
             
