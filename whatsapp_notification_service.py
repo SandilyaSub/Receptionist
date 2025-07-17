@@ -52,8 +52,6 @@ You are an exceptional copywriter creating WhatsApp messages for a receptionist 
 
 You will receive call_type and critical_call_details from customer interactions. Your task is to generate content for a 4-component WhatsApp template structure that creates delightful, personality-rich messages.
 
-Remember to return your response as a valid JSON object with exactly four components (body_1, body_2, body_3, body_4) as specified in the system instructions. DO NOT include code blocks, or triple backticks or newline characters in your response as Meta rejects those messages.
-
 COMPONENT STRUCTURE:
 The message follows this format:
 "Hi {{body_1}}! 👋
@@ -70,7 +68,73 @@ Regards,
 Aarohi ( helllo.ai )"
 
 YOUR TASK:
-Generate a JSON response with exactly 4 components:
+Generate exactly 4 separate text components in this order:
+
+BODY_1:
+[Your body_1 content here]
+
+BODY_2:
+[Your body_2 content here]
+
+BODY_3:
+[Your body_3 content here]
+
+BODY_4:
+[Your body_4 content here]
+
+COMPONENT GUIDELINES:
+
+BODY_1: 
+- Use customer name if available in critical_call_details
+- If no name, use "there" or appropriate greeting
+- Just the name/greeting, no additional text
+
+BODY_2:
+- Acknowledge the call context with enthusiasm
+- Include 1-2 relevant emojis
+- Keep it conversational and warm
+- Examples: "Just confirmed your cake order - 2 delicious treats coming your way! 🎂", "Thanks for your interest in our digital wedding invitations! 💌"
+
+BODY_3:
+- Include ALL critical details from the call
+- Format key information clearly
+- Use specific details like dates, times, prices, quantities
+- Be comprehensive but concise
+- Examples: "1kg Dutch Truffle (round) + 0.5kg Butterscotch (square), both eggless. Ready tomorrow at 6 PM!", "2D invitations: ₹1,500-₹2,900 | 3D with caricatures: ₹3,500-₹4,500. 1-day delivery!"
+
+BODY_4:
+- Personality-driven closing message
+- Include relevant emoji
+- Match the business context
+- Create anticipation or warmth
+- Examples: "We'll have your birthday surprises ready! See you tomorrow! ✨", "Ready to make your special day unforgettable? 🎉"
+
+IMPORTANT RULES:
+- Always return exactly 4 components with the BODY_1:, BODY_2:, BODY_3:, BODY_4: labels
+- No newlines within individual component content
+- Include relevant emojis but don't overuse them
+- Match tone to business type (playful for bakery, elegant for invitations, professional for medical)
+- ALL critical details must be included in BODY_3
+- Keep messages warm, engaging, and professional
+
+BUSINESS CONTEXT ADAPTATION:
+- Bakery: Use food emojis (🎂🍰🧁), warm language about treats and celebrations
+- Joy Invite: Use celebration emojis (💕🎉💌), romantic/festive language
+- Medical: Use professional emojis (🏥🩺), caring but professional tone
+- General: Adapt emoji and tone to context
+
+EXAMPLE OUTPUT:
+BODY_1:
+Sandy
+
+BODY_2:
+Just confirmed your cake order - 2 delicious treats coming your way! 🎂
+
+BODY_3:
+1kg Dutch Truffle (round) + 0.5kg Butterscotch (square), both eggless as requested. Ready for pickup tomorrow at 6 PM sharp!
+
+BODY_4:
+We'll have your birthday surprises wrapped and ready! See you tomorrow! ✨
 
 {
   "body_1": "Customer name or appropriate greeting",
@@ -181,163 +245,201 @@ EXAMPLE OUTPUT:
             self.logger.error(f"Error fetching tenant config: {str(e)}")
             return {}
     
-    async def generate_ai_message(self, call_type: str, critical_call_details: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_labeled_components(self, text: str) -> Dict[str, str]:
         """
-        Generate WhatsApp message using Gemini Flash 2.5
+        Parse labeled components from the AI response text.
+        
+        Args:
+            text: The AI-generated text with labeled components
+            
+        Returns:
+            Dictionary with the 4 body components
+        """
+        components = {
+            "body_1": "",
+            "body_2": "",
+            "body_3": "",
+            "body_4": ""
+        }
+        
+        # Split text into lines for parsing
+        lines = text.strip().split('\n')
+        
+        current_component = None
+        component_content = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Check for component labels
+            if line.upper().startswith("BODY_1:"):
+                current_component = "body_1"
+                # Extract content after the label
+                content = line[len("BODY_1:"):].strip()
+                if content:
+                    component_content.append(content)
+            elif line.upper().startswith("BODY_2:"):
+                # Save previous component if we were collecting one
+                if current_component and component_content:
+                    components[current_component] = " ".join(component_content)
+                    component_content = []
+                
+                current_component = "body_2"
+                content = line[len("BODY_2:"):].strip()
+                if content:
+                    component_content.append(content)
+            elif line.upper().startswith("BODY_3:"):
+                if current_component and component_content:
+                    components[current_component] = " ".join(component_content)
+                    component_content = []
+                    
+                current_component = "body_3"
+                content = line[len("BODY_3:"):].strip()
+                if content:
+                    component_content.append(content)
+            elif line.upper().startswith("BODY_4:"):
+                if current_component and component_content:
+                    components[current_component] = " ".join(component_content)
+                    component_content = []
+                    
+                current_component = "body_4"
+                content = line[len("BODY_4:"):].strip()
+                if content:
+                    component_content.append(content)
+            elif current_component:
+                # Add this line to the current component's content
+                component_content.append(line)
+        
+        # Save the last component if we were collecting one
+        if current_component and component_content:
+            components[current_component] = " ".join(component_content)
+        
+        return components
+
+    def validate_message_components(self, components: Dict[str, str]) -> Dict[str, str]:
+        """
+        Validate message components and provide defaults for missing ones.
+        
+        Args:
+            components: Dictionary with the message components
+            
+        Returns:
+            Validated dictionary with all required components
+        """
+        # Default values for missing components
+        if not components.get("body_1"):
+            components["body_1"] = "there"
+        if not components.get("body_2"):
+            components["body_2"] = "Thank you for your inquiry."
+        if not components.get("body_3"):
+            components["body_3"] = "We've received your message and will follow up shortly."
+        if not components.get("body_4"):
+            components["body_4"] = "We look forward to serving you soon!"
+        
+        return components
+
+    def default_message_components(self) -> Dict[str, str]:
+        """
+        Return default message components for fallback situations.
+        
+        Returns:
+            Dictionary with default message components
+        """
+        return {
+            "body_1": "there",
+            "body_2": "Thank you for your inquiry.",
+            "body_3": "We've received your message and will follow up shortly.",
+            "body_4": "We look forward to serving you soon!"
+        }
+        
+    async def generate_ai_message(self, call_type: str, critical_call_details: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Generate WhatsApp message components using Gemini Flash 2.5
         
         Args:
             call_type: Type of call (e.g., "Booking", "Informational")
             critical_call_details: Details extracted from the call
             
         Returns:
-            AI-generated message components as a dictionary or error message
+            Dictionary with 4 body components
         """
         if not GEMINI_API_KEY:
             self.logger.error("Cannot generate message: GEMINI_API_KEY not configured")
-            return "Unable to generate message: API key not configured"
-        input_data = {
-            "call_type": call_type,
-            "critical_call_details": critical_call_details
-        }
-        
+            return self.default_message_components()
+            
         # Use the class attribute for system instruction defined in __init__
-        self.logger.info("Using 4-component JSON format for customer notification")        
+        self.logger.info("Using 4-component labeled format for customer notification")        
         try:
             # Use the genai package exactly as in transcript_analyzer.py
             client = genai.Client(api_key=GEMINI_API_KEY)
+            model = client.get_model("gemini-2.5-flash")
             
-            # Log the input data for debugging
-            self.logger.info(f"Input data for AI message generation: {json.dumps(input_data, indent=2)}")
-            
-            # Format call details in a more structured way
+            # Prepare details string for the prompt
             details_str = ""
-            if input_data.get('critical_call_details'):
-                for key, value in input_data['critical_call_details'].items():
-                    details_str += f"{key}: {value}\n"
+            if critical_call_details:
+                if isinstance(critical_call_details, str):
+                    details_str = critical_call_details
+                else:
+                    for key, value in critical_call_details.items():
+                        details_str += f"{key}: {value}\n"
             
-            # Create a structured prompt that explicitly asks for the 4-component JSON format
+            # Create a structured prompt that asks for labeled components
             prompt = f"""
-            Create a WhatsApp notification message for a {input_data.get('call_type', 'Unknown')} call with the following details:
+            Create a WhatsApp notification message for a {call_type} call with the following details:
             
             {details_str}
             
-            Remember to return your response as a valid JSON object with exactly four components (body_1, body_2, body_3, body_4) as specified in the system instructions.
+            Remember to provide exactly 4 separate text components labeled as BODY_1, BODY_2, BODY_3, and BODY_4 as specified in the system instructions.
             """
-            
-            # Use the class attribute for system instruction
-            self.logger.info("Using 4-component JSON format for customer notification")
-            
             
             self.logger.info(f"Sending prompt to Gemini API:\n{prompt}")
             
-            # Call the model using asyncio.to_thread to avoid blocking - simplified API call
-            try:
-                # Create contents using the types.Content and types.Part format from the cookbook
-                contents = [
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_text(text=prompt),
-                        ],
-                    ),
-                ]
-                
-                # Create generate_content_config using the exact format from the cookbook
-                generate_content_config = types.GenerateContentConfig(
-                    temperature=0.7,
-                    thinking_config=types.ThinkingConfig(
-                        thinking_budget=0,
-                    ),
-                    safety_settings=[
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_HARASSMENT",
-                            threshold="BLOCK_NONE",
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_HATE_SPEECH",
-                            threshold="BLOCK_NONE",
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            threshold="BLOCK_NONE",
-                        ),
-                        types.SafetySetting(
-                            category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                            threshold="BLOCK_NONE",
-                        ),
-                    ],
-                    response_mime_type="text/plain",
-                    system_instruction=[
-                        types.Part.from_text(text=self.ai_system_instruction),
-                    ],
-                )
-                
-                # Call the model with the config parameter exactly as in the cookbook
-                response = await asyncio.to_thread(
-                    client.models.generate_content,
-                    model="gemini-2.5-flash",
-                    contents=contents,
-                    config=generate_content_config,
-                )
-                
-                # Log the raw response for debugging
-                self.logger.info(f"Raw Gemini API response: {response}")
-                
-                if not response or not hasattr(response, 'text'):
-                    self.logger.error("Invalid response from Gemini API: missing 'text' attribute")
-                    raise ValueError("Invalid response from Gemini API: missing 'text' attribute")
-                    
-                self.logger.info(f"AI generated message: {response.text}")
-                
-                # Try to parse the response as JSON
-                try:
-                    message_components = json.loads(response.text.strip())
-                    
-                    # Validate that all required components are present
-                    required_components = ["body_1", "body_2", "body_3", "body_4"]
-                    missing_components = [comp for comp in required_components if comp not in message_components]
-                    
-                    if missing_components:
-                        self.logger.warning(f"Missing components in AI response: {missing_components}")
-                        # Add default values for missing components
-                        for comp in missing_components:
-                            if comp == "body_1":
-                                message_components[comp] = "there"
-                            elif comp == "body_2":
-                                message_components[comp] = "Thank you for your inquiry."
-                            elif comp == "body_3":
-                                message_components[comp] = "We've received your message and will follow up shortly."
-                            elif comp == "body_4":
-                                message_components[comp] = "We look forward to serving you soon!"
-                    
-                    self.logger.info(f"Generated message components: {json.dumps(message_components, indent=2)}")
-                    return message_components
-                    
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"Failed to parse AI response as JSON: {str(e)}")
-                    self.logger.error(f"Raw response: {response.text}")
-                    # Return default message components
-                    return {
-                        "body_1": "there",
-                        "body_2": "Thank you for your inquiry.",
-                        "body_3": "We've received your message and will follow up shortly.",
-                        "body_4": "We look forward to serving you soon!"
+            # Configure the generation parameters
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 1024,
+            }
+            
+            # Create the chat session with our system instruction
+            chat = model.start_chat(
+                history=[
+                    {
+                        "role": "user",
+                        "parts": [{"text": self.ai_system_instruction}]
+                    },
+                    {
+                        "role": "model", 
+                        "parts": [{"text": "I understand my role as a copywriter creating WhatsApp messages for a receptionist AI system. I'll generate 4 distinct components for each message following the structure and guidelines you've provided."}]
                     }
-                
-            except Exception as api_error:
-                self.logger.error(f"Error in Gemini API call: {str(api_error)}")
-                raise  # Re-raise to be caught by the outer exception handler
+                ]
+            )
+            
+            # Send the prompt and get the response
+            response = chat.send_message(prompt)
+            
+            self.logger.info(f"Raw Gemini API response: {response}")
+            
+            if not hasattr(response, 'text'):
+                raise ValueError("Invalid response from Gemini API: missing 'text' attribute")
+                    
+            self.logger.info(f"AI generated message: {response.text}")
+            
+            # Parse the labeled components
+            message_components = self.parse_labeled_components(response.text)
+            
+            # Validate and provide defaults for missing components
+            message_components = self.validate_message_components(message_components)
+            
+            self.logger.info(f"Generated message components: {json.dumps(message_components, indent=2)}")
+            return message_components
                 
         except Exception as e:
             self.logger.error(f"Error generating AI message: {str(e)}")
             self.logger.exception("Full exception details:")
             # Fallback message in case of error
-            return {
-                "body_1": "there",
-                "body_2": "Thank you for your inquiry.",
-                "body_3": "We've received your message and will follow up shortly.",
-                "body_4": "We look forward to serving you soon!"
-            }
+            return self.default_message_components()
     
     def format_phone_number(self, phone: str) -> str:
         """
