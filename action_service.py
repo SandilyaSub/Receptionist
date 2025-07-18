@@ -324,37 +324,29 @@ class ActionService:
         # Log the AI-generated message
         self.logger.info(f"AI generated message for customer: {ai_message[:50]}...")
         
-        # Gather template data with the AI message
+        # Prepare template data for MSG91 provider (matching test script format)
         template_data = {
-            "phone_numbers": formatted_phone,
-            "message_body": ai_message  # This is the key field that will be used in the template
+            "phone_numbers": [formatted_phone],  # Must be a list, not a string
+            "branch_name": "Test Branch",  # Default branch name
+            "message_body": ai_message,  # This should be the dictionary with body_1, body_2, etc.
+            "branch_head_phone": self.owner_phone  # Use configured owner phone
         }
         
-        self.logger.info(f"Template data prepared for customer notification")
+        self.logger.info(f"Template data prepared for customer notification: {template_data}")
         
         if not template_data:
             self.logger.error(f"Failed to prepare template data for call_sid: {call_sid}")
             return False
             
-        # Render template
-        rendered_template = await self.whatsapp_service.render_template(
-            template_name=template_name,
-            template_data=template_data
-        )
-        
-        if not rendered_template:
-            self.logger.error(f"Failed to render template {template_name} for call_sid: {call_sid}")
-            return False
-            
         try:
-            # Send using MSG91 provider
+            # Send using MSG91 provider directly (skip render_template to avoid issues)
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
                 template_name="service_message",  # Use service_message template directly
-                template_data=rendered_template
+                template_data=template_data  # Pass template_data directly
             )
             self.logger.info(f"Customer notification result: {result}")
-            return result
+            return result.get('status') == 'success' if isinstance(result, dict) else bool(result)
         except Exception as e:
             self.logger.error(f"Error sending customer notification: {str(e)}")
             raise  # Re-raise for retry mechanism

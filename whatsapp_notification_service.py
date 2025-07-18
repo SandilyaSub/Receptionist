@@ -15,8 +15,7 @@ from google import genai
 from google.genai import types
 from supabase_client import get_supabase_client
 
-# Configure Gemini API - not needed, we'll use the Client approach as in transcript_analyzer.py
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# We'll configure Gemini API dynamically when needed
 
 class WhatsAppNotificationService:
     """Service for sending WhatsApp notifications with AI-generated content"""
@@ -40,7 +39,7 @@ class WhatsAppNotificationService:
         }
         
         # Validate initialization
-        if not GEMINI_API_KEY:
+        if not os.getenv("GEMINI_API_KEY"):
             self.logger.warning("WhatsApp notification service initialized without GEMINI_API_KEY")
         
         if not self.templates_dir.exists():
@@ -245,16 +244,56 @@ EXAMPLE OUTPUT:
             self.logger.error(f"Error fetching tenant config: {str(e)}")
             return {}
     
-    def parse_labeled_components(self, text: str) -> Dict[str, str]:
+    def extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
         """
-        Parse labeled components from the AI response text.
+        Extract JSON from text that might be wrapped in code fences (triple backticks)
         
         Args:
-            text: The AI-generated text with labeled components
+            text: Text that might contain JSON, possibly wrapped in code fences
             
         Returns:
-            Dictionary with the 4 body components
+            Parsed JSON dictionary or None if parsing failed
         """
+        try:
+            # First, try to parse the text directly as JSON
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+                
+            # If that fails, look for code fences
+            # Pattern: ```json\n{...}\n``` or ```{...}```
+            import re
+            json_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+            match = re.search(json_pattern, text)
+            
+            if match:
+                json_str = match.group(1).strip()
+                return json.loads(json_str)
+                
+            return None
+        except Exception as e:
+            self.logger.error(f"Error extracting JSON from text: {str(e)}")
+            return None
+    
+    def parse_labeled_components(self, text: str) -> Dict[str, str]:
+        """
+        Parse labeled components from text
+        
+        Args:
+            text: Text to parse
+            
+        Returns:
+            Dictionary with labeled components
+        """
+        # First, try to extract JSON from the text
+        json_components = self.extract_json_from_text(text)
+        if json_components:
+            self.logger.info(f"Successfully extracted JSON components: {json_components}")
+            # Convert all values to strings if they aren't already
+            return {k: str(v) for k, v in json_components.items()}
+            
+        # If JSON extraction fails, fall back to the original parsing logic
         components = {
             "body_1": "",
             "body_2": "",
@@ -363,7 +402,9 @@ EXAMPLE OUTPUT:
         Returns:
             Dictionary with 4 body components
         """
-        if not GEMINI_API_KEY:
+        # Get API key dynamically from environment
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
             self.logger.error("Cannot generate message: GEMINI_API_KEY not configured")
             return self.default_message_components()
             
@@ -371,7 +412,7 @@ EXAMPLE OUTPUT:
         self.logger.info("Using 4-component labeled format for customer notification")        
         try:
             # Use the genai package with the correct syntax
-            client = genai.Client(api_key=GEMINI_API_KEY)
+            client = genai.Client(api_key=api_key)
             
             # Prepare details string for the prompt
             details_str = ""
@@ -432,7 +473,7 @@ EXAMPLE OUTPUT:
                     
             self.logger.info(f"AI generated message: {response_text}")
             
-            # Parse the labeled components
+            # Parse the labeled components (now with JSON extraction support)
             message_components = self.parse_labeled_components(response_text)
             
             # Validate and provide defaults for missing components
