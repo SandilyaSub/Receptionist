@@ -172,93 +172,142 @@ class MSG91Provider:
         Returns:
             Dict with components formatted for the specific template
         """
-        if template_name == "owner_message":
-            # For owner_message template with 4 variables
-            return {
-                "body_1": {
-                    "type": "text",
-                    "value": template_data.get("var1", "")  # Customer phone
-                },
-                "body_2": {
-                    "type": "text",
-                    "value": template_data.get("var2", "")  # Call type
-                },
-                "body_3": {
-                    "type": "text",
-                    "value": template_data.get("var3", "")  # Summary
-                },
-                "body_4": {
-                    "type": "text",
-                    "value": template_data.get("var4", "")  # Pipe-separated key-value pairs
-                }
-            }
-        else:
-            # Default for service_message template with 4 variables
-            message_body = template_data.get("message_body", {})
-            
-            # Handle the case where message_body is already a dictionary with the 4 components
-            if isinstance(message_body, dict) and all(key in message_body for key in ["body_1", "body_2", "body_3", "body_4"]):
-                self.logger.info("Using structured 4-component message format")
+        try:
+            if template_name == "owner_message":
+                # For owner_message template with 4 variables
                 return {
                     "body_1": {
                         "type": "text",
-                        "value": message_body.get("body_1", "there")
+                        "value": str(template_data.get("var1", ""))  # Customer phone
                     },
                     "body_2": {
                         "type": "text",
-                        "value": message_body.get("body_2", "Thank you for your inquiry.")
+                        "value": str(template_data.get("var2", ""))  # Call type
                     },
                     "body_3": {
                         "type": "text",
-                        "value": message_body.get("body_3", "We've received your message and will follow up shortly.")
+                        "value": str(template_data.get("var3", ""))  # Summary
                     },
                     "body_4": {
                         "type": "text",
-                        "value": message_body.get("body_4", "We look forward to serving you soon!")
+                        "value": str(template_data.get("var4", ""))  # Pipe-separated key-value pairs
                     }
                 }
-            
-            # Handle the case where message_body is a string that might be JSON
-            if isinstance(message_body, str) and message_body.strip().startswith('{'):
-                try:
-                    # Try to parse as JSON
-                    parsed_body = json.loads(message_body)
-                    if isinstance(parsed_body, dict) and all(key in parsed_body for key in ["body_1", "body_2", "body_3", "body_4"]):
-                        self.logger.info("Parsed message_body string as JSON with 4 components")
+            else:
+                # Default for service_message template with 4 variables
+                message_body = template_data.get("message_body", {})
+                
+                # Ensure message_body is not None and handle safely
+                if message_body is None:
+                    message_body = {}
+                
+                # Handle the case where message_body is already a dictionary with the 4 components
+                if isinstance(message_body, dict):
+                    # Check if it has the expected keys safely
+                    expected_keys = ["body_1", "body_2", "body_3", "body_4"]
+                    has_all_keys = True
+                    try:
+                        for key in expected_keys:
+                            if key not in message_body:
+                                has_all_keys = False
+                                break
+                    except (TypeError, AttributeError):
+                        has_all_keys = False
+                    
+                    if has_all_keys:
+                        self.logger.info("Using structured 4-component message format")
                         return {
                             "body_1": {
                                 "type": "text",
-                                "value": parsed_body.get("body_1", "there")
+                                "value": str(message_body.get("body_1", "there"))
                             },
                             "body_2": {
                                 "type": "text",
-                                "value": parsed_body.get("body_2", "Thank you for your inquiry.")
+                                "value": str(message_body.get("body_2", "Thank you for your inquiry."))
                             },
                             "body_3": {
                                 "type": "text",
-                                "value": parsed_body.get("body_3", "We've received your message and will follow up shortly.")
+                                "value": str(message_body.get("body_3", "We've received your message and will follow up shortly."))
                             },
                             "body_4": {
                                 "type": "text",
-                                "value": parsed_body.get("body_4", "We look forward to serving you soon!")
+                                "value": str(message_body.get("body_4", "We look forward to serving you soon!"))
                             }
                         }
-                except json.JSONDecodeError:
-                    self.logger.warning("Failed to parse message_body as JSON, using fallback")
-            
-            # Fallback for backward compatibility or error cases
-            self.logger.warning("Using fallback 4-component message format")
-            
-            # Convert message_body to string if it's a dict but not in the expected format
-            if isinstance(message_body, dict):
-                try:
-                    message_body = json.dumps(message_body, indent=2)
-                except Exception as e:
-                    self.logger.error(f"Error converting dict to string: {str(e)}")
-                    message_body = str(message_body)
-            
-            # If message_body is a string, use it as body_3 (the main content)
-            if isinstance(message_body, str):
+                
+                # Handle the case where message_body is a string that might be JSON
+                if isinstance(message_body, str) and message_body.strip().startswith('{'):
+                    try:
+                        # Try to parse as JSON
+                        parsed_body = json.loads(message_body)
+                        if isinstance(parsed_body, dict):
+                            # Check if it has the expected keys safely
+                            expected_keys = ["body_1", "body_2", "body_3", "body_4"]
+                            has_all_keys = True
+                            try:
+                                for key in expected_keys:
+                                    if key not in parsed_body:
+                                        has_all_keys = False
+                                        break
+                            except (TypeError, AttributeError):
+                                has_all_keys = False
+                            
+                            if has_all_keys:
+                                self.logger.info("Parsed message_body string as JSON with 4 components")
+                                return {
+                                    "body_1": {
+                                        "type": "text",
+                                        "value": str(parsed_body.get("body_1", "there"))
+                                    },
+                                    "body_2": {
+                                        "type": "text",
+                                        "value": str(parsed_body.get("body_2", "Thank you for your inquiry."))
+                                    },
+                                    "body_3": {
+                                        "type": "text",
+                                        "value": str(parsed_body.get("body_3", "We've received your message and will follow up shortly."))
+                                    },
+                                    "body_4": {
+                                        "type": "text",
+                                        "value": str(parsed_body.get("body_4", "We look forward to serving you soon!"))
+                                    }
+                                }
+                    except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                        self.logger.warning(f"Failed to parse message_body as JSON: {str(e)}, using fallback")
+                
+                # Fallback for backward compatibility or error cases
+                self.logger.warning("Using fallback 4-component message format")
+                
+                # Convert message_body to string if it's a dict but not in the expected format
+                if isinstance(message_body, dict):
+                    try:
+                        message_body = json.dumps(message_body, indent=2)
+                    except Exception as e:
+                        self.logger.error(f"Error converting dict to string: {str(e)}")
+                        message_body = str(message_body)
+                
+                # If message_body is a string, use it as body_3 (the main content)
+                if isinstance(message_body, str):
+                    return {
+                        "body_1": {
+                            "type": "text",
+                            "value": "there"
+                        },
+                        "body_2": {
+                            "type": "text",
+                            "value": "Thank you for your inquiry."
+                        },
+                        "body_3": {
+                            "type": "text",
+                            "value": message_body or "We've received your message and will follow up shortly."
+                        },
+                        "body_4": {
+                            "type": "text",
+                            "value": "We look forward to serving you soon!"
+                        }
+                    }
+                
+                # Final fallback with empty values
                 return {
                     "body_1": {
                         "type": "text",
@@ -270,15 +319,17 @@ class MSG91Provider:
                     },
                     "body_3": {
                         "type": "text",
-                        "value": message_body or "We've received your message and will follow up shortly."
+                        "value": "We've received your message and will follow up shortly."
                     },
                     "body_4": {
                         "type": "text",
                         "value": "We look forward to serving you soon!"
                     }
                 }
-            
-            # Final fallback with empty values
+        except Exception as e:
+            # Catch any unexpected errors in the template preparation
+            self.logger.error(f"Error in _prepare_template_components: {str(e)}")
+            # Return a safe fallback
             return {
                 "body_1": {
                     "type": "text",
