@@ -534,7 +534,8 @@ class ActionService:
             total_count = len(results)
             
             # Log to notifications table
-            await self.supabase.table("notifications").insert({
+            # Note: execute() is synchronous and returns APIResponse, not awaitable
+            self.supabase.table("notifications").insert({
                 "call_sid": call_sid,
                 "notification_type": "whatsapp",
                 "recipient": "multiple",  # Required field - cannot be null
