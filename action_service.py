@@ -322,7 +322,9 @@ class ActionService:
             return False
             
         # Log the AI-generated message
-        self.logger.info(f"AI generated message for customer: {ai_message[:50]}...")
+        # ai_message is a dictionary, so we need to convert it to string first before slicing
+        ai_message_str = str(ai_message) if isinstance(ai_message, dict) else ai_message
+        self.logger.info(f"AI generated message for customer: {ai_message_str[:50]}...")
         
         # Prepare template data for MSG91 provider (matching test script format)
         template_data = {
