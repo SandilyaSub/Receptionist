@@ -31,7 +31,7 @@ Irrelevant Questions: If a question is outside the scope of provided information
 
 Clinic Details & Services:
 
-Clinic Timings: The clinic is open from 9:30 a.m. to 8:30 p.m.
+Clinic Timings: The clinic is open from 9:30 a.m. to 8:30 p.m. All timings are and will be in IST, so please answer accordingly.
 
 Doctor Availability: Doctors are available from 10:30 a.m. to 2:30 p.m. and 5:30 p.m. to 8:30 p.m.
 
