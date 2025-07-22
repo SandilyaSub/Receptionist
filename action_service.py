@@ -369,7 +369,7 @@ class ActionService:
         
         # Get owner phone from tenant config with fallback
         try:
-            tenant_config = await self.supabase.table("tenant_configs").select("*").eq("tenant_id", tenant_id).single().execute()
+            tenant_config = self.supabase.table("tenant_configs").select("*").eq("tenant_id", tenant_id).single().execute()
             owner_phone = tenant_config.data.get("branch_head_phone_number") if tenant_config.data else None
             if owner_phone:
                 self.logger.info(f"Using tenant-specific owner phone: {owner_phone} for tenant: {tenant_id}")
