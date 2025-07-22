@@ -30,12 +30,12 @@ class WhatsAppNotificationService:
         self.logger = logger or logging.getLogger(__name__)
         self.templates_dir = Path(__file__).parent / "msgTemplates"
         
-        # Template mapping based on call_type - using service_booking for all types
+        # Template mapping based on call_type - using customer_message for all types
         self.template_mapping = {
-            "Booking": "service_message.json",
-            "Informational": "service_message.json",
-            # Default to service_message for any other call types
-            "Unknown": "service_message.json"
+            "Booking": "customer_message.json",
+            "Informational": "customer_message.json",
+            # Default to customer_message for any other call types
+            "Unknown": "customer_message.json"
         }
         
         # Validate initialization

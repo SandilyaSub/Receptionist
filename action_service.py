@@ -348,9 +348,9 @@ class ActionService:
             self.logger.error("No call_type provided for customer notification")
             return False
             
-        # Use service_message template directly for all customer notifications
-        template_name = "service_message.json"
-        self.logger.info(f"Using service_message template for customer {call_type} notification")
+        # Use customer_message template directly for all customer notifications
+        template_name = "customer_message.json"
+        self.logger.info(f"Using customer_message template for customer {call_type} notification")
             
         # Generate AI message for the customer
         ai_message = await self.whatsapp_service.generate_ai_message(
@@ -367,12 +367,17 @@ class ActionService:
         ai_message_str = str(ai_message) if isinstance(ai_message, dict) else ai_message
         self.logger.info(f"AI generated message for customer: {ai_message_str[:50]}...")
         
-        # Prepare template data for MSG91 provider (matching test script format)
+        # Prepare template data for MSG91 provider (5-component customer_message template)
+        # ai_message contains body_1, body_2, body_3, body_4 - we need to add body_5 for owner phone
         template_data = {
             "phone_numbers": [formatted_phone],  # Must be a list, not a string
             "branch_name": "Test Branch",  # Default branch name
-            "message_body": ai_message,  # This should be the dictionary with body_1, body_2, etc.
-            "branch_head_phone": self.owner_phone  # Use configured owner phone
+            "body_1": ai_message.get("body_1", "Hi there! 👋"),
+            "body_2": ai_message.get("body_2", "Thank you for your call!"),
+            "body_3": ai_message.get("body_3", "We've noted your request."),
+            "body_4": ai_message.get("body_4", "Our team will be in touch soon!"),
+            "body_5": owner_phone,  # Owner phone as 5th component
+            "branch_head_phone": owner_phone  # Keep for backward compatibility
         }
         
         self.logger.info(f"Template data prepared for customer notification: {template_data}")
@@ -385,7 +390,7 @@ class ActionService:
             # Send using MSG91 provider directly (skip render_template to avoid issues)
             result = await self.msg91_provider.send_message(
                 to_number=formatted_phone,
-                template_name="service_message",  # Use service_message template directly
+                template_name="customer_message",  # Use customer_message template directly
                 template_data=template_data  # Pass template_data directly
             )
             self.logger.info(f"Customer notification result: {result}")

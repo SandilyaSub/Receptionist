@@ -193,6 +193,52 @@ class MSG91Provider:
                         "value": str(template_data.get("var4", ""))  # Pipe-separated key-value pairs
                     }
                 }
+            elif template_name == "customer_message":
+                # For customer_message template with 5 variables (includes owner phone as 5th param)
+                message_body = template_data.get("message_body", {})
+                
+                # Get the owner phone from template_data
+                owner_phone = template_data.get("body_5", "")
+                
+                # Ensure message_body is not None and handle safely
+                if message_body is None:
+                    message_body = {}
+                
+                # Handle the case where message_body is a dictionary or JSON string
+                parsed_body = {}
+                
+                if isinstance(message_body, dict):
+                    parsed_body = message_body
+                elif isinstance(message_body, str) and message_body.strip().startswith('{'):
+                    try:
+                        parsed_body = json.loads(message_body)
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        parsed_body = {}
+                
+                # Create the 5-component template with owner phone as body_5
+                self.logger.info("Using 5-component format for customer notification template")
+                return {
+                    "body_1": {
+                        "type": "text",
+                        "value": str(parsed_body.get("body_1", "there"))
+                    },
+                    "body_2": {
+                        "type": "text",
+                        "value": str(parsed_body.get("body_2", "Thank you for your inquiry."))
+                    },
+                    "body_3": {
+                        "type": "text",
+                        "value": str(parsed_body.get("body_3", "We've received your message and will follow up shortly."))
+                    },
+                    "body_4": {
+                        "type": "text",
+                        "value": str(parsed_body.get("body_4", "We look forward to serving you soon!"))
+                    },
+                    "body_5": {
+                        "type": "text",
+                        "value": str(owner_phone)
+                    }
+                }
             else:
                 # Default for service_message template with 4 variables
                 message_body = template_data.get("message_body", {})
@@ -242,6 +288,7 @@ class MSG91Provider:
                         parsed_body = json.loads(message_body)
                         if isinstance(parsed_body, dict):
                             # Check if it has the expected keys safely
+                            # For backward compatibility, we check for 4 components
                             expected_keys = ["body_1", "body_2", "body_3", "body_4"]
                             has_all_keys = True
                             try:
