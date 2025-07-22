@@ -195,44 +195,29 @@ class MSG91Provider:
                 }
             elif template_name == "customer_message":
                 # For customer_message template with 5 variables (includes owner phone as 5th param)
-                message_body = template_data.get("message_body", {})
+                # ActionService passes AI-generated components directly as body_1, body_2, etc.
                 
                 # Get the owner phone from template_data
                 owner_phone = template_data.get("body_5", "")
                 
-                # Ensure message_body is not None and handle safely
-                if message_body is None:
-                    message_body = {}
-                
-                # Handle the case where message_body is a dictionary or JSON string
-                parsed_body = {}
-                
-                if isinstance(message_body, dict):
-                    parsed_body = message_body
-                elif isinstance(message_body, str) and message_body.strip().startswith('{'):
-                    try:
-                        parsed_body = json.loads(message_body)
-                    except (json.JSONDecodeError, TypeError, AttributeError):
-                        parsed_body = {}
-                
-                # Create the 5-component template with owner phone as body_5
+                # Create the 5-component template using direct template_data fields
                 self.logger.info("Using 5-component format for customer notification template")
                 return {
                     "body_1": {
                         "type": "text",
-                        "value": str(parsed_body.get("body_1", "there"))
+                        "value": str(template_data.get("body_1", "there"))
                     },
                     "body_2": {
                         "type": "text",
-                        "value": str(parsed_body.get("body_2", "Thank you for your inquiry."))
+                        "value": str(template_data.get("body_2", "Thank you for your inquiry."))
                     },
                     "body_3": {
                         "type": "text",
-                        "value": str(parsed_body.get("body_3", "We've received your message and will follow up shortly."))
+                        "value": str(template_data.get("body_3", "We've received your message and will follow up shortly."))
                     },
                     "body_4": {
                         "type": "text",
-                        "value": str(parsed_body.get("body_4", "We look forward to serving you soon!"))
+                        "value": str(template_data.get("body_4", "We look forward to serving you soon!"))
                     },
                     "body_5": {
                         "type": "text",
