@@ -92,13 +92,16 @@ class ActionService:
         try:
             self.logger.info(f"Processing actions for call {call_sid}, tenant: {tenant_id}")
             
-            # 1. Fetch call details from database
+            # 1. Fetch tenant configuration from database
+            tenant_config = await self._fetch_tenant_config(tenant_id)
+            
+            # 2. Fetch call details from database
             call_details = await self._fetch_call_details(call_sid)
             if not call_details:
                 self.logger.error(f"No call details found for call_sid: {call_sid}")
                 return False
                 
-            # 2. Format customer phone (from_number with +91 prefix)
+            # 3. Format customer phone (from_number with +91 prefix)
             raw_phone = call_details.get("from_number")
             self.logger.info(f"Raw customer phone from database: '{raw_phone}' for call_sid: {call_sid}")
             
@@ -118,10 +121,18 @@ class ActionService:
                 self.logger.error(f"Invalid customer phone number for call_sid: {call_sid}")
                 return False
             
-            # 3. Send notifications
+            # 4. Determine owner phone from tenant config with fallback
+            owner_phone = tenant_config.get("branch_head_phone_number")
+            if owner_phone:
+                self.logger.info(f"Using tenant-specific owner phone: {owner_phone} for tenant: {tenant_id}")
+            else:
+                owner_phone = self.owner_phone
+                self.logger.warning(f"No tenant-specific owner phone found for {tenant_id}, falling back to default: {owner_phone}")
+            
+            # 5. Send notifications
             results = []
             
-            # 3.1 Send customer notification if phone available and call_type is supported
+            # 5.1 Send customer notification if phone available and call_type is supported
             customer_phone = call_details.get("from_number")
             call_type = call_details.get("call_type", "Unknown")
             
@@ -145,9 +156,9 @@ class ActionService:
                 else:
                     self.logger.info(f"Skipping notification for call_type: {call_type}")
             
-            # 3.2 Send owner notification
+            # 5.2 Send owner notification using tenant-specific phone
             owner_result = await self._send_owner_notification(
-                phone=self.owner_phone,
+                phone=owner_phone,  # Now using tenant-specific phone with fallback
                 data={
                     "call_type": call_type,
                     "details": call_details.get("critical_call_details", {}),
@@ -171,6 +182,36 @@ class ActionService:
             self.logger.error(f"Error processing actions for call {call_sid}: {str(e)}")
             return False
     
+    async def _fetch_tenant_config(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Fetch tenant configuration from Supabase
+        
+        Args:
+            tenant_id: The tenant identifier
+            
+        Returns:
+            Dict containing tenant configuration or empty dict if not found
+        """
+        try:
+            supabase = get_supabase_client()
+            response = await asyncio.to_thread(
+                lambda: supabase.table("tenant_configs")
+                .select("*")
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            
+            if response.data and len(response.data) > 0:
+                self.logger.info(f"Found tenant config for tenant_id: {tenant_id}")
+                return response.data[0]
+            else:
+                self.logger.warning(f"No tenant config found for tenant_id: {tenant_id}")
+                return {}
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching tenant config: {str(e)}")
+            return {}
+
     async def _fetch_call_details(self, call_sid: str) -> Optional[Dict[str, Any]]:
         """
         Fetch call details from Supabase
