@@ -367,6 +367,19 @@ class ActionService:
         ai_message_str = str(ai_message) if isinstance(ai_message, dict) else ai_message
         self.logger.info(f"AI generated message for customer: {ai_message_str[:50]}...")
         
+        # Get owner phone from tenant config with fallback
+        try:
+            tenant_config = await self.supabase_client.table("tenant_configs").select("*").eq("tenant_id", tenant_id).single().execute()
+            owner_phone = tenant_config.data.get("branch_head_phone_number") if tenant_config.data else None
+            if owner_phone:
+                self.logger.info(f"Using tenant-specific owner phone: {owner_phone} for tenant: {tenant_id}")
+            else:
+                owner_phone = self.owner_phone
+                self.logger.warning(f"No tenant-specific owner phone found for {tenant_id}, falling back to default: {owner_phone}")
+        except Exception as e:
+            self.logger.warning(f"Error fetching tenant config for {tenant_id}: {str(e)}, using default owner phone")
+            owner_phone = self.owner_phone
+        
         # Prepare template data for MSG91 provider (5-component customer_message template)
         # ai_message contains body_1, body_2, body_3, body_4 - we need to add body_5 for owner phone
         template_data = {
