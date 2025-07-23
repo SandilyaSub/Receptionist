@@ -535,11 +535,20 @@ class GeminiSession:
             return None
             
         try:
-            # Sum up all token usage from the conversation
+            # Initialize counters for detailed breakdown
             total_tokens = 0
-            total_input = 0
-            total_output = 0
-            response_breakdown = []
+            total_prompt_tokens = 0
+            total_response_tokens = 0
+            
+            # Detailed breakdown by modality
+            prompt_audio_tokens = 0
+            prompt_text_tokens = 0
+            response_audio_tokens = 0
+            response_text_tokens = 0
+            
+            # Collect all breakdown details for final summary
+            all_prompt_details = []
+            all_response_details = []
             
             self.logger.debug(f"Processing {len(self.conversation_tokens)} usage_metadata objects for token extraction")
             
@@ -548,53 +557,149 @@ class GeminiSession:
                     self.logger.warning(f"Skipping None usage_metadata at index {i}")
                     continue
                     
-                # Handle None values by coercing to 0 with additional safety checks
                 try:
+                    # Get basic token counts (these are the reliable fields)
                     token_count = getattr(usage, 'total_token_count', None)
-                    input_count = getattr(usage, 'input_token_count', None)
-                    output_count = getattr(usage, 'output_token_count', None)
+                    prompt_count = getattr(usage, 'prompt_token_count', None)
+                    response_count = getattr(usage, 'response_token_count', None)
                     
+                    # Add to totals
                     total_tokens += int(token_count) if token_count is not None else 0
-                    total_input += int(input_count) if input_count is not None else 0
-                    total_output += int(output_count) if output_count is not None else 0
+                    total_prompt_tokens += int(prompt_count) if prompt_count is not None else 0
+                    total_response_tokens += int(response_count) if response_count is not None else 0
                     
-                    self.logger.debug(f"Usage {i}: total={token_count}, input={input_count}, output={output_count}")
-                except (ValueError, TypeError) as e:
-                    self.logger.warning(f"Error processing usage_metadata at index {i}: {e}")
-                    continue
-                
-                # Extract response breakdown if available
-                if hasattr(usage, 'response_tokens_details') and usage.response_tokens_details:
-                    try:
-                        for detail in usage.response_tokens_details:
+                    self.logger.debug(f"Usage {i}: total={token_count}, prompt={prompt_count}, response={response_count}")
+                    
+                    # Process prompt tokens details (input tokens by modality)
+                    if hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+                        for detail in usage.prompt_tokens_details:
                             if detail is not None:
-                                modality = str(detail.modality) if hasattr(detail, 'modality') else "unknown"
-                                count = getattr(detail, 'token_count', None)
+                                modality = str(getattr(detail, 'modality', 'unknown')).upper()
+                                count = getattr(detail, 'token_count', 0)
                                 count = int(count) if count is not None else 0
-                                response_breakdown.append({
+                                
+                                if modality == 'AUDIO':
+                                    prompt_audio_tokens += count
+                                elif modality == 'TEXT':
+                                    prompt_text_tokens += count
+                                
+                                all_prompt_details.append({
                                     "modality": modality,
                                     "count": count
                                 })
-                    except Exception as breakdown_error:
-                        self.logger.warning(f"Error processing response breakdown at index {i}: {breakdown_error}")
+                    
+                    # Process response tokens details (output tokens by modality)
+                    if hasattr(usage, 'response_tokens_details') and usage.response_tokens_details:
+                        for detail in usage.response_tokens_details:
+                            if detail is not None:
+                                modality = str(getattr(detail, 'modality', 'unknown')).upper()
+                                count = getattr(detail, 'token_count', 0)
+                                count = int(count) if count is not None else 0
+                                
+                                if modality == 'AUDIO':
+                                    response_audio_tokens += count
+                                elif modality == 'TEXT':
+                                    response_text_tokens += count
+                                
+                                all_response_details.append({
+                                    "modality": modality,
+                                    "count": count
+                                })
+                                
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"Error processing usage_metadata at index {i}: {e}")
+                    continue
+            
+            # Calculate input/output tokens based on breakdown
+            # Input tokens = prompt tokens (both audio and text)
+            input_tokens = total_prompt_tokens
+            # Output tokens = response tokens (both audio and text)
+            output_tokens = total_response_tokens
             
             conversation_token_data = {
-                "model": "gemini-2.5-flash-preview-native-audio-dialog",  # Actual conversation model
+                "model": "gemini-2.5-flash-preview-native-audio-dialog",
                 "total_tokens": total_tokens,
-                "input_tokens": total_input,
-                "output_tokens": total_output
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "prompt_tokens": total_prompt_tokens,
+                "response_tokens": total_response_tokens,
+                "breakdown": {
+                    "prompt_audio_tokens": prompt_audio_tokens,
+                    "prompt_text_tokens": prompt_text_tokens,
+                    "response_audio_tokens": response_audio_tokens,
+                    "response_text_tokens": response_text_tokens
+                }
             }
             
-            # Add response breakdown if we have any
-            if response_breakdown:
-                conversation_token_data["response_breakdown"] = response_breakdown
+            # Add detailed breakdown arrays if we have data
+            if all_prompt_details:
+                conversation_token_data["prompt_details"] = all_prompt_details
+            if all_response_details:
+                conversation_token_data["response_details"] = all_response_details
             
-            self.logger.info(f"Extracted conversation tokens for session {self.session_id}: {total_tokens} total tokens from {len(self.conversation_tokens)} usage reports")
+            self.logger.info(f"Extracted conversation tokens for session {self.session_id}: {total_tokens} total ({input_tokens} input, {output_tokens} output) from {len(self.conversation_tokens)} usage reports")
+            self.logger.debug(f"Token breakdown - Prompt Audio: {prompt_audio_tokens}, Prompt Text: {prompt_text_tokens}, Response Audio: {response_audio_tokens}, Response Text: {response_text_tokens}")
+            
             return conversation_token_data
             
         except Exception as e:
             self.logger.error(f"Error extracting conversation tokens for session {self.session_id}: {str(e)}")
             return None
+    
+    def print_token_summary(self):
+        """Print a comprehensive token usage summary for debugging purposes."""
+        if not self.conversation_tokens:
+            self.logger.info(f"No conversation tokens collected for session {self.session_id}")
+            return
+            
+        self.logger.info(f"\n=== TOKEN USAGE SUMMARY FOR SESSION {self.session_id} ===")
+        self.logger.info(f"Total usage reports collected: {len(self.conversation_tokens)}")
+        
+        # Get the aggregated token data
+        token_data = self.extract_total_conversation_tokens()
+        if token_data:
+            self.logger.info(f"\n--- AGGREGATED TOTALS ---")
+            self.logger.info(f"Total Tokens: {token_data['total_tokens']}")
+            self.logger.info(f"Input Tokens: {token_data['input_tokens']}")
+            self.logger.info(f"Output Tokens: {token_data['output_tokens']}")
+            self.logger.info(f"Prompt Tokens: {token_data['prompt_tokens']}")
+            self.logger.info(f"Response Tokens: {token_data['response_tokens']}")
+            
+            if 'breakdown' in token_data:
+                breakdown = token_data['breakdown']
+                self.logger.info(f"\n--- MODALITY BREAKDOWN ---")
+                self.logger.info(f"Prompt Audio Tokens: {breakdown['prompt_audio_tokens']}")
+                self.logger.info(f"Prompt Text Tokens: {breakdown['prompt_text_tokens']}")
+                self.logger.info(f"Response Audio Tokens: {breakdown['response_audio_tokens']}")
+                self.logger.info(f"Response Text Tokens: {breakdown['response_text_tokens']}")
+            
+            # Cost estimation based on Google's pricing
+            # Input audio: $3.00/1M tokens, Output audio: $12.00/1M tokens
+            # Text tokens: $0.30/1M for input, $1.20/1M for output (approximate)
+            if 'breakdown' in token_data:
+                breakdown = token_data['breakdown']
+                input_audio_cost = (breakdown['prompt_audio_tokens'] / 1_000_000) * 3.00
+                output_audio_cost = (breakdown['response_audio_tokens'] / 1_000_000) * 12.00
+                input_text_cost = (breakdown['prompt_text_tokens'] / 1_000_000) * 0.30
+                output_text_cost = (breakdown['response_text_tokens'] / 1_000_000) * 1.20
+                total_cost = input_audio_cost + output_audio_cost + input_text_cost + output_text_cost
+                
+                self.logger.info(f"\n--- ESTIMATED COSTS (USD) ---")
+                self.logger.info(f"Input Audio Cost: ${input_audio_cost:.6f}")
+                self.logger.info(f"Output Audio Cost: ${output_audio_cost:.6f}")
+                self.logger.info(f"Input Text Cost: ${input_text_cost:.6f}")
+                self.logger.info(f"Output Text Cost: ${output_text_cost:.6f}")
+                self.logger.info(f"Total Estimated Cost: ${total_cost:.6f}")
+        
+        self.logger.info(f"\n--- RAW USAGE DATA ---")
+        for i, usage in enumerate(self.conversation_tokens):
+            if usage:
+                total = getattr(usage, 'total_token_count', 'N/A')
+                prompt = getattr(usage, 'prompt_token_count', 'N/A')
+                response = getattr(usage, 'response_token_count', 'N/A')
+                self.logger.info(f"Usage {i}: Total={total}, Prompt={prompt}, Response={response}")
+        
+        self.logger.info(f"=== END TOKEN SUMMARY ===")
     
     async def initialize(self):
         """Initialize the Gemini session with retry logic."""
@@ -976,7 +1081,46 @@ class GeminiSession:
                             # Track conversation tokens if usage_metadata is available
                             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                                 self.conversation_tokens.append(response.usage_metadata)
-                                self.logger.debug(f"Accumulated conversation token data: {response.usage_metadata.total_token_count if hasattr(response.usage_metadata, 'total_token_count') else 'unknown'} tokens")
+                                
+                                # Enhanced token logging based on cookbook findings
+                                usage = response.usage_metadata
+                                self.logger.debug(f"Token usage details - Type: {type(usage)}")
+                                
+                                # Log all available attributes for debugging
+                                attrs = [attr for attr in dir(usage) if not attr.startswith('_')]
+                                self.logger.debug(f"Available usage_metadata attributes: {attrs}")
+                                
+                                # Log basic token counts
+                                total_tokens = getattr(usage, 'total_token_count', None)
+                                input_tokens = getattr(usage, 'input_token_count', None) or getattr(usage, 'input_tokens', None)
+                                output_tokens = getattr(usage, 'output_token_count', None) or getattr(usage, 'output_tokens', None)
+                                prompt_tokens = getattr(usage, 'prompt_token_count', None)
+                                response_tokens = getattr(usage, 'response_token_count', None)
+                                
+                                self.logger.debug(f"Basic token counts - Total: {total_tokens}, Input: {input_tokens}, Output: {output_tokens}, Prompt: {prompt_tokens}, Response: {response_tokens}")
+                                
+                                # Log detailed breakdown if available
+                                if hasattr(usage, 'prompt_tokens_details'):
+                                    prompt_details = usage.prompt_tokens_details
+                                    self.logger.debug(f"Prompt tokens details: {prompt_details}")
+                                    if prompt_details:
+                                        for detail in prompt_details:
+                                            if detail:
+                                                modality = getattr(detail, 'modality', 'unknown')
+                                                count = getattr(detail, 'token_count', 0)
+                                                self.logger.debug(f"  Prompt - Modality: {modality}, Tokens: {count}")
+                                
+                                if hasattr(usage, 'response_tokens_details'):
+                                    response_details = usage.response_tokens_details
+                                    self.logger.debug(f"Response tokens details: {response_details}")
+                                    if response_details:
+                                        for detail in response_details:
+                                            if detail:
+                                                modality = getattr(detail, 'modality', 'unknown')
+                                                count = getattr(detail, 'token_count', 0)
+                                                self.logger.debug(f"  Response - Modality: {modality}, Tokens: {count}")
+                                
+                                self.logger.debug(f"Accumulated conversation token data: {total_tokens} total tokens")
                             
                             # Extract audio data from response
                             audio_data = None
@@ -1250,6 +1394,9 @@ class GeminiSession:
     async def run_post_call_processing(self):
         """Runs all post-call tasks in the background without blocking."""
         self.logger.info(f"Starting background post-call processing for {self.session_id}")
+        
+        # Print detailed token summary for debugging
+        self.print_token_summary()
 
         # 1. Fetch and store Exotel call details first - needed for notifications
         if self.call_sid:
