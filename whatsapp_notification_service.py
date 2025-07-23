@@ -470,6 +470,13 @@ EXAMPLE OUTPUT:
             
             self.logger.info(f"Raw Gemini API response: {response}")
             
+            # Track token usage if token_accumulator is available
+            if hasattr(self, 'token_accumulator') and self.token_accumulator:
+                self.token_accumulator.add_whatsapp_tokens(
+                    response.usage_metadata,
+                    "gemini-2.5-flash"
+                )
+            
             # Extract text from the response
             response_text = response.text
                     

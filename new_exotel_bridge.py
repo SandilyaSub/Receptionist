@@ -37,6 +37,12 @@ class TranscriptManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.final_model_text = ""
         self.supabase_client = supabase
+        
+        # Initialize token accumulator if call_sid is available
+        self.token_accumulator = None
+        if self.call_sid:
+            from ai_token_tracker import CallTokenAccumulator
+            self.token_accumulator = CallTokenAccumulator(self.call_sid, self.logger)
 
     def add_to_transcript(self, role, text):
         """Adds a message to the transcript."""
@@ -122,7 +128,7 @@ class TranscriptManager:
             # Step 2: Analyze the transcript (import locally to ensure config is loaded)
             from transcript_analyzer import analyze_transcript
             full_transcript_text = "\n".join([f"{turn['role']}: {turn['text']}" for turn in self.transcript_data["conversation"]])
-            analysis_result = await analyze_transcript(full_transcript_text, self.tenant, GEMINI_API_KEY)
+            analysis_result = await analyze_transcript(full_transcript_text, self.tenant, GEMINI_API_KEY, self.token_accumulator)
 
             # Step 3: Update the record with the analysis results
             if analysis_result:
@@ -138,7 +144,7 @@ class TranscriptManager:
                 try:
                     from action_service import ActionService
                     action_service = ActionService(logger=self.logger)
-                    success = await action_service.process_call_actions(self.call_sid, self.tenant)
+                    success = await action_service.process_call_actions(self.call_sid, self.tenant, self.token_accumulator)
                     if success:
                         self.logger.info(f"Successfully processed notifications for call {self.call_sid}")
                     else:
@@ -146,6 +152,15 @@ class TranscriptManager:
                 except Exception as action_error:
                     self.logger.error(f"Error processing notifications: {action_error}")
                     # Continue with cleanup even if notifications fail
+                
+                # Save accumulated token data to database at the end
+                if self.token_accumulator:
+                    try:
+                        await self.token_accumulator.save_to_database()
+                        self.logger.info(f"Successfully saved token usage data for call {self.call_sid}")
+                    except Exception as token_error:
+                        self.logger.error(f"Error saving token data: {token_error}")
+                        # Continue with cleanup even if token save fails
             else:
                 self.logger.warning(f"Analysis returned no result for record {record_id}. No update performed.")
 

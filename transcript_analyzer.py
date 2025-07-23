@@ -82,7 +82,7 @@ Respond ONLY with a JSON object in this exact format:
 """
 
 # --- Main Analyzer Function ---
-async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Optional[Dict[str, Any]]:
+async def analyze_transcript(transcript: str, tenant: str, api_key: str, token_accumulator=None) -> Optional[Dict[str, Any]]:
     """Analyzes a transcript to extract call type and key details."""
     if not transcript:
         logger.warning("Analyzer: Transcript is empty, skipping analysis.")
@@ -140,6 +140,13 @@ async def analyze_transcript(transcript: str, tenant: str, api_key: str) -> Opti
         )
         
         logger.debug(f"Analyzer: Raw Gemini response text: {response.text}")
+        
+        # Track token usage if token_accumulator is provided
+        if token_accumulator:
+            token_accumulator.add_analysis_tokens(
+                response.usage_metadata,
+                "gemini-2.5-flash"
+            )
         
         # Parse the JSON response
         extracted_data = json.loads(response.text)

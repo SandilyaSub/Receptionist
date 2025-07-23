@@ -78,17 +78,24 @@ class ActionService:
         # Initialize Supabase client
         self.supabase = get_supabase_client()
     
-    async def process_call_actions(self, call_sid: str, tenant_id: str) -> bool:
+    async def process_call_actions(self, call_sid: str, tenant_id: str, token_accumulator=None) -> bool:
         """
         Main entry point - process all actions for a completed call
         
         Args:
-            call_sid: The Exotel call SID
-            tenant_id: The tenant identifier (e.g., 'bakery', 'saloon')
+            call_sid: The call SID from Exotel
+            tenant_id: The tenant identifier
+            token_accumulator: Optional token accumulator for tracking AI usage
             
         Returns:
-            bool: True if all actions were processed successfully, False otherwise
+            bool: True if all actions completed successfully, False otherwise
         """
+        self.logger.info(f"Processing call actions for call_sid: {call_sid}, tenant: {tenant_id}")
+        
+        # Set token accumulator on WhatsApp service if provided
+        if token_accumulator:
+            self.whatsapp_service.token_accumulator = token_accumulator
+            
         try:
             self.logger.info(f"Processing actions for call {call_sid}, tenant: {tenant_id}")
             
