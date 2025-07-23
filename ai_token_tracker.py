@@ -74,6 +74,25 @@ class CallTokenAccumulator:
         except Exception as e:
             self.logger.warning(f"Failed to add conversation tokens for call {self.call_sid}: {str(e)}")
     
+    def add_aggregated_conversation_tokens(self, conversation_token_data: dict):
+        """
+        Add pre-aggregated conversation token data from GeminiSession
+        
+        Args:
+            conversation_token_data: Dictionary with aggregated token data from extract_total_conversation_tokens
+        """
+        try:
+            if not conversation_token_data:
+                return
+                
+            # Store the aggregated conversation tokens directly
+            self.tokens["conversation"] = conversation_token_data.copy()
+            
+            self.logger.info(f"Added aggregated conversation tokens for call {self.call_sid}: {conversation_token_data['total_tokens']} total")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to add aggregated conversation tokens for call {self.call_sid}: {str(e)}")
+    
     def add_analysis_tokens(self, usage_metadata, model: str):
         """
         Add token usage from transcript analysis

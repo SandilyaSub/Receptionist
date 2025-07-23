@@ -130,11 +130,8 @@ class TranscriptManager:
             try:
                 conversation_token_data = self.gemini_session.extract_total_conversation_tokens()
                 if conversation_token_data:
-                    # Add conversation tokens to the accumulator
-                    self.token_accumulator.add_conversation_tokens(
-                        conversation_token_data, 
-                        conversation_token_data["model"]
-                    )
+                    # Add aggregated conversation tokens to the accumulator
+                    self.token_accumulator.add_aggregated_conversation_tokens(conversation_token_data)
                     self.logger.info(f"Successfully added conversation tokens to accumulator: {conversation_token_data['total_tokens']} tokens")
                 else:
                     self.logger.warning("No conversation tokens were collected during the session")
@@ -582,7 +579,7 @@ class GeminiSession:
                         self.logger.warning(f"Error processing response breakdown at index {i}: {breakdown_error}")
             
             conversation_token_data = {
-                "model": "gemini-2.0-flash-exp",  # Current conversation model
+                "model": "gemini-2.5-flash-preview-native-audio-dialog",  # Actual conversation model
                 "total_tokens": total_tokens,
                 "input_tokens": total_input,
                 "output_tokens": total_output
