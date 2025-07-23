@@ -15,6 +15,7 @@ __pycache__/
 # Environment variables
 .env
 .env.*
+.gitignore
 
 # Logs and data
 *.log
@@ -35,6 +36,7 @@ server.js.old
 Working_files_for_backup/
 
 # Local test scripts & one-off files
+/test_scripts/
 local_test_client.py
 wss_exotel_test_client.py
 test_transcript_manager.py
@@ -46,4 +48,10 @@ test_client.js
 test_conversation.js
 cookbook_test.py
 inspect_gemini_api.py
+
+Working Cookbook files/claude_whatsapp_service.py
+logs/transcript.json
+tenant_repository/bakery/prompts/assistant - older.txt
+tenant_repository/bakery/prompts/assistant copy 2.txt
+tenant_repository/sreedevi_dental_rjy/prompts/assistant copy.txt
 
