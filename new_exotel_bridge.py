@@ -544,18 +544,42 @@ class GeminiSession:
             total_output = 0
             response_breakdown = []
             
-            for usage in self.conversation_tokens:
-                total_tokens += getattr(usage, 'total_token_count', 0)
-                total_input += getattr(usage, 'input_token_count', 0)
-                total_output += getattr(usage, 'output_token_count', 0)
+            self.logger.debug(f"Processing {len(self.conversation_tokens)} usage_metadata objects for token extraction")
+            
+            for i, usage in enumerate(self.conversation_tokens):
+                if usage is None:
+                    self.logger.warning(f"Skipping None usage_metadata at index {i}")
+                    continue
+                    
+                # Handle None values by coercing to 0 with additional safety checks
+                try:
+                    token_count = getattr(usage, 'total_token_count', None)
+                    input_count = getattr(usage, 'input_token_count', None)
+                    output_count = getattr(usage, 'output_token_count', None)
+                    
+                    total_tokens += int(token_count) if token_count is not None else 0
+                    total_input += int(input_count) if input_count is not None else 0
+                    total_output += int(output_count) if output_count is not None else 0
+                    
+                    self.logger.debug(f"Usage {i}: total={token_count}, input={input_count}, output={output_count}")
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"Error processing usage_metadata at index {i}: {e}")
+                    continue
                 
                 # Extract response breakdown if available
-                if hasattr(usage, 'response_tokens_details'):
-                    for detail in usage.response_tokens_details:
-                        response_breakdown.append({
-                            "modality": str(detail.modality) if hasattr(detail, 'modality') else "unknown",
-                            "count": getattr(detail, 'token_count', 0)
-                        })
+                if hasattr(usage, 'response_tokens_details') and usage.response_tokens_details:
+                    try:
+                        for detail in usage.response_tokens_details:
+                            if detail is not None:
+                                modality = str(detail.modality) if hasattr(detail, 'modality') else "unknown"
+                                count = getattr(detail, 'token_count', None)
+                                count = int(count) if count is not None else 0
+                                response_breakdown.append({
+                                    "modality": modality,
+                                    "count": count
+                                })
+                    except Exception as breakdown_error:
+                        self.logger.warning(f"Error processing response breakdown at index {i}: {breakdown_error}")
             
             conversation_token_data = {
                 "model": "gemini-2.0-flash-exp",  # Current conversation model
