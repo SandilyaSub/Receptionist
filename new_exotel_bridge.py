@@ -29,10 +29,11 @@ os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
 # TranscriptManager class for saving conversation transcripts and running analysis
 class TranscriptManager:
     """Manages the conversation transcript, saves it, and runs analysis."""
-    def __init__(self, session_id=None, call_sid=None, tenant=None):
+    def __init__(self, session_id=None, call_sid=None, tenant=None, gemini_session=None):
         self.session_id = session_id or str(uuid.uuid4())
         self.call_sid = call_sid
         self.tenant = tenant
+        self.gemini_session = gemini_session  # Reference to GeminiSession for conversation tokens
         self.transcript_data = {"session_id": self.session_id, "conversation": []}
         self.logger = logging.getLogger(self.__class__.__name__)
         self.final_model_text = ""
@@ -123,6 +124,23 @@ class TranscriptManager:
         except Exception as e:
             self.logger.error(f"Error saving initial transcript to Supabase: {e}")
             return # Stop if initial save fails
+
+        # Extract conversation tokens from GeminiSession if available
+        if self.gemini_session and self.token_accumulator:
+            try:
+                conversation_token_data = self.gemini_session.extract_total_conversation_tokens()
+                if conversation_token_data:
+                    # Add conversation tokens to the accumulator
+                    self.token_accumulator.add_conversation_tokens(
+                        conversation_token_data, 
+                        conversation_token_data["model"]
+                    )
+                    self.logger.info(f"Successfully added conversation tokens to accumulator: {conversation_token_data['total_tokens']} tokens")
+                else:
+                    self.logger.warning("No conversation tokens were collected during the session")
+            except Exception as token_error:
+                self.logger.error(f"Error extracting conversation tokens: {token_error}")
+                # Continue with analysis even if token extraction fails
 
         try:
             # Step 2: Analyze the transcript (import locally to ensure config is loaded)
@@ -505,6 +523,57 @@ class GeminiSession:
         # Will be detected from first audio chunk
         self.gemini_output_sample_rate = None
         self.gemini_output_channels = None
+        
+        # Conversation token tracking
+        self.conversation_tokens = []  # Store all usage_metadata from conversation
+    
+    def extract_total_conversation_tokens(self):
+        """Extract and sum up all conversation tokens from the session.
+        
+        Returns:
+            dict: Token usage data for conversation, or None if no tokens were collected
+        """
+        if not self.conversation_tokens:
+            self.logger.info(f"No conversation tokens collected for session {self.session_id}")
+            return None
+            
+        try:
+            # Sum up all token usage from the conversation
+            total_tokens = 0
+            total_input = 0
+            total_output = 0
+            response_breakdown = []
+            
+            for usage in self.conversation_tokens:
+                total_tokens += getattr(usage, 'total_token_count', 0)
+                total_input += getattr(usage, 'input_token_count', 0)
+                total_output += getattr(usage, 'output_token_count', 0)
+                
+                # Extract response breakdown if available
+                if hasattr(usage, 'response_tokens_details'):
+                    for detail in usage.response_tokens_details:
+                        response_breakdown.append({
+                            "modality": str(detail.modality) if hasattr(detail, 'modality') else "unknown",
+                            "count": getattr(detail, 'token_count', 0)
+                        })
+            
+            conversation_token_data = {
+                "model": "gemini-2.0-flash-exp",  # Current conversation model
+                "total_tokens": total_tokens,
+                "input_tokens": total_input,
+                "output_tokens": total_output
+            }
+            
+            # Add response breakdown if we have any
+            if response_breakdown:
+                conversation_token_data["response_breakdown"] = response_breakdown
+            
+            self.logger.info(f"Extracted conversation tokens for session {self.session_id}: {total_tokens} total tokens from {len(self.conversation_tokens)} usage reports")
+            return conversation_token_data
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting conversation tokens for session {self.session_id}: {str(e)}")
+            return None
     
     async def initialize(self):
         """Initialize the Gemini session with retry logic."""
@@ -601,7 +670,8 @@ class GeminiSession:
                     self.transcript_manager = TranscriptManager(
                         call_sid=self.call_sid,
                         session_id=self.session_id,
-                        tenant=self.tenant
+                        tenant=self.tenant,
+                        gemini_session=self
                     )
                     
                     # Ensure call_details directory exists
@@ -702,7 +772,8 @@ class GeminiSession:
                                 self.transcript_manager = TranscriptManager(
                                     call_sid=self.call_sid,
                                     session_id=self.session_id,
-                                    tenant=self.tenant
+                                    tenant=self.tenant,
+                                    gemini_session=self
                                 )
                                 self.logger.info(f"Transcript manager initialized for call_id: {self.call_sid}")
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
@@ -880,6 +951,11 @@ class GeminiSession:
                         # Process responses in this turn
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
+                            
+                            # Track conversation tokens if usage_metadata is available
+                            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                                self.conversation_tokens.append(response.usage_metadata)
+                                self.logger.debug(f"Accumulated conversation token data: {response.usage_metadata.total_token_count if hasattr(response.usage_metadata, 'total_token_count') else 'unknown'} tokens")
                             
                             # Extract audio data from response
                             audio_data = None
