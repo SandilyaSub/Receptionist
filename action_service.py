@@ -592,11 +592,12 @@ class ActionService:
         
         Args:
             call_sid: The Exotel call SID
-            results: List of results from sending notifications
+            results: List of results from sending notifications (tuples of (recipient_type, result))
         """
         try:
             # Convert results to a simple format for logging
-            success_count = sum(1 for r in results if isinstance(r, bool) and r)
+            # Each result is a tuple of (recipient_type, result)
+            success_count = sum(1 for _, r in results if isinstance(r, bool) and r)
             total_count = len(results)
             
             # Log to notifications table
