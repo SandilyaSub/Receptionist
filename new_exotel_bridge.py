@@ -495,6 +495,12 @@ class GeminiSession:
         self.tenant = tenant  # Store the initial tenant
         self.logger = logging.getLogger(f"GeminiSession-{session_id}")
         
+        # Connection health monitoring
+        self.connection_start_time = time.time()
+        self.last_activity_time = time.time()
+        self.gemini_response_times = []  # Track Gemini response latencies
+        self.connection_state = "initializing"  # initializing -> active -> degraded -> failed
+        
         # Will be initialized later
         self.gemini_session = None
         
@@ -1330,9 +1336,11 @@ class GeminiSession:
     
     async def send_keep_alive_messages(self):
         """Send periodic keep-alive messages to prevent Exotel from timing out the connection."""
-        self.logger.info("Starting keep-alive message task")
-        keep_alive_interval = 10.0  # Increased to reduce unnecessary traffic and potential interference
+        self.logger.info("Starting enhanced keep-alive message task")
+        keep_alive_interval = 30.0  # Increased from 10s to 30s for better stability
         keep_alive_counter = 0
+        consecutive_failures = 0
+        max_consecutive_failures = 3
         
         try:
             while True:
@@ -1362,21 +1370,45 @@ class GeminiSession:
                 keep_alive_counter += 1
                 self.sequence_number += 1
                 
-                try:
-                    await self.websocket.send(json.dumps({
-                        "event": "mark",
-                        "sequence_number": str(self.sequence_number),
-                        "stream_sid": self.stream_sid,
-                        "mark": {
-                            "name": f"keep_alive_{keep_alive_counter}"
-                        }
-                    }))
-                    self.logger.debug(f"Sent keep-alive message #{keep_alive_counter}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to send keep-alive message: {e}")
-                    # If we can't send a message, the connection might be closed
-                    # Wait a bit before trying again
-                    await asyncio.sleep(0.5)
+                # Retry logic for sending keep-alive
+                retry_count = 0
+                max_retries = 3
+                send_success = False
+                
+                while retry_count < max_retries and not send_success:
+                    try:
+                        send_start_time = time.time()
+                        await self.websocket.send(json.dumps({
+                            "event": "mark",
+                            "sequence_number": str(self.sequence_number),
+                            "stream_sid": self.stream_sid,
+                            "mark": {
+                                "name": f"keep_alive_{keep_alive_counter}",
+                                "timestamp": time.time()
+                            }
+                        }))
+                        send_duration = time.time() - send_start_time
+                        
+                        self.logger.debug(f"Sent keep-alive message #{keep_alive_counter} (attempt {retry_count + 1}, took {send_duration:.3f}s)")
+                        send_success = True
+                        consecutive_failures = 0  # Reset failure counter on success
+                        
+                    except Exception as e:
+                        retry_count += 1
+                        consecutive_failures += 1
+                        
+                        if retry_count < max_retries:
+                            retry_delay = min(2 ** (retry_count - 1), 5)  # Exponential backoff, max 5s
+                            self.logger.warning(f"Keep-alive send failed (attempt {retry_count}/{max_retries}): {e}. Retrying in {retry_delay}s...")
+                            await asyncio.sleep(retry_delay)
+                        else:
+                            self.logger.error(f"Keep-alive send failed after {max_retries} attempts: {e}")
+                
+                # Check if we've had too many consecutive failures
+                if consecutive_failures >= max_consecutive_failures:
+                    self.logger.error(f"Too many consecutive keep-alive failures ({consecutive_failures}). Connection may be unstable.")
+                    # Don't break here - let the WebSocket timeout handle the disconnection
+                    # This gives us better observability without being too aggressive
                 
                 # Wait before sending the next keep-alive
                 await asyncio.sleep(keep_alive_interval)
@@ -1385,6 +1417,8 @@ class GeminiSession:
             self.logger.info("Keep-alive task cancelled")
         except Exception as e:
             self.logger.error(f"Error in keep-alive task: {e}")
+        finally:
+            self.logger.info(f"Keep-alive task ended. Sent {keep_alive_counter} messages, {consecutive_failures} consecutive failures at end.")
     
     def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
@@ -1678,11 +1712,16 @@ class ExotelGeminiBridge:
             # Handle the connection with the path and explicit tenant
             await self.handle_connection(websocket, path, tenant)
         
-        # Start the server
+        # Start the server with robust configuration for voice calls
         server = await websockets.serve(
             handler,
             self.host,
-            self.port
+            self.port,
+            ping_interval=30,      # Send ping every 30 seconds (increased from default 20s)
+            ping_timeout=15,       # Wait 15 seconds for pong response
+            close_timeout=10,      # Don't wait forever to close connections
+            max_size=2**20,        # 1MB max message size (sufficient for audio chunks)
+            max_queue=64           # Allow reasonable message queue for concurrent calls
         )
         
         self.logger.info("Server started. Waiting for connections...")
