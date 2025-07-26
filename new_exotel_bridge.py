@@ -286,6 +286,114 @@ except Exception as e:
     logging.error(f"Failed to initialize Supabase client: {e}")
     supabase = None
 
+# Import language utilities
+from language_utils import map_language_to_bcp47_code
+
+# Tenant greeting configuration cache
+tenant_greeting_cache = {}
+CACHE_LOADED = False
+
+async def load_tenant_greeting_configs():
+    """Load all tenant greeting configurations into cache at startup.
+    
+    Returns:
+        dict: Tenant greeting configurations keyed by tenant_id
+    """
+    global tenant_greeting_cache, CACHE_LOADED
+    
+    if not supabase:
+        logging.warning("Supabase client not available, using empty greeting cache")
+        return {}
+    
+    try:
+        logging.info("Loading tenant greeting configurations...")
+        
+        # Fetch all active tenant greeting configs
+        response = supabase.table('tenant_configs').select(
+            'tenant_id, language, welcome_message'
+        ).eq('is_active', True).execute()
+        
+        if response.data:
+            for config in response.data:
+                tenant_id = config.get('tenant_id')
+                if tenant_id:
+                    # Map language to BCP-47 code for Gemini Live API
+                    language_bcp47 = map_language_to_bcp47_code(config.get('language', 'english'))
+                    welcome_message = config.get('welcome_message')
+                    
+                    tenant_greeting_cache[tenant_id] = {
+                        'language_bcp47': language_bcp47,
+                        'welcome_message': welcome_message
+                    }
+                    
+                    logging.info(f"Loaded greeting config for tenant '{tenant_id}': language_bcp47={language_bcp47}, has_custom_message={bool(welcome_message)}")
+            
+            CACHE_LOADED = True
+            logging.info(f"Successfully loaded {len(tenant_greeting_cache)} tenant greeting configurations")
+        else:
+            logging.warning("No tenant greeting configurations found in database")
+            
+    except Exception as e:
+        logging.error(f"Failed to load tenant greeting configurations: {e}")
+        # Don't raise exception - we'll use defaults
+    
+    return tenant_greeting_cache
+
+async def get_tenant_greeting_config(tenant_id: str) -> dict:
+    """Get greeting configuration for a specific tenant.
+    
+    Args:
+        tenant_id: The tenant identifier
+        
+    Returns:
+        dict: Greeting configuration with 'language' and 'welcome_message' keys
+    """
+    global tenant_greeting_cache, CACHE_LOADED
+    
+    # If cache not loaded yet, try to load it
+    if not CACHE_LOADED:
+        await load_tenant_greeting_configs()
+    
+    # Check cache first
+    if tenant_id in tenant_greeting_cache:
+        config = tenant_greeting_cache[tenant_id]
+        logging.info(f"Found cached greeting config for tenant '{tenant_id}': {config}")
+        return config
+    
+    # If not in cache, try to fetch from database
+    if supabase:
+        try:
+            logging.info(f"Fetching greeting config for tenant '{tenant_id}' from database...")
+            response = supabase.table('tenant_configs').select(
+                'language, welcome_message'
+            ).eq('tenant_id', tenant_id).eq('is_active', True).execute()
+            
+            if response.data:
+                config_data = response.data[0]
+                language_bcp47 = map_language_to_bcp47_code(config_data.get('language', 'english'))
+                welcome_message = config_data.get('welcome_message')
+                
+                config = {
+                    'language_bcp47': language_bcp47,
+                    'welcome_message': welcome_message
+                }
+                
+                # Cache the result
+                tenant_greeting_cache[tenant_id] = config
+                logging.info(f"Fetched and cached greeting config for tenant '{tenant_id}': {config}")
+                return config
+        except Exception as e:
+            logging.error(f"Failed to fetch greeting config for tenant '{tenant_id}': {e}")
+    
+    # Fallback to defaults
+    default_config = {
+        'language_bcp47': 'en-US',
+        'welcome_message': None
+    }
+    
+    logging.info(f"Using default greeting config for tenant '{tenant_id}': {default_config}")
+    return default_config
+
 # Create a custom filter to filter out specific log messages
 class NonTextPartsFilter(logging.Filter):
     """Filter to remove warnings about non-text parts in Gemini responses."""
@@ -651,6 +759,53 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error extracting conversation tokens for session {self.session_id}: {str(e)}")
             return None
+
+    async def send_dynamic_initial_greeting(self):
+        """Send tenant-specific initial greeting based on cached configuration."""
+        try:
+            # Get tenant-specific greeting configuration
+            greeting_config = await get_tenant_greeting_config(self.tenant)
+            
+            # Determine the welcome message
+            if greeting_config.get('welcome_message'):
+                greeting_message = greeting_config['welcome_message']
+                self.logger.info(f"Using custom welcome message for tenant '{self.tenant}': {greeting_message}")
+            else:
+                greeting_message = "Hello there. My name is Aarohi. How may I help you today?"
+                self.logger.info(f"Using default welcome message for tenant '{self.tenant}': {greeting_message}")
+            
+            # Log the BCP-47 language code (for future voice configuration)
+            language_bcp47 = greeting_config.get('language_bcp47', 'en-US')
+            self.logger.info(f"Tenant '{self.tenant}' language BCP-47 code: {language_bcp47}")
+            
+            # Note: In the future, we could use language_bcp47 to configure Gemini voice
+            # For now, we use the default voice but log the language for reference
+            
+            # Send the greeting message to Gemini
+            # Note: The language_bcp47 could be used for voice configuration in future updates
+            await self.gemini_session.send_client_content(
+                turns={"parts": [{"text": greeting_message}]}
+            )
+            
+            # Add to transcript
+            if self.transcript_manager:
+                self.transcript_manager.add_to_transcript("assistant", greeting_message)
+            
+            self.logger.info(f"✅ Dynamic initial greeting sent successfully for tenant '{self.tenant}'")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to send dynamic greeting: {e}")
+            # Fallback to basic greeting
+            try:
+                fallback_message = "Hello there. My name is Aarohi. How may I help you today?"
+                await self.gemini_session.send_client_content(
+                    turns={"parts": [{"text": fallback_message}]}
+                )
+                if self.transcript_manager:
+                    self.transcript_manager.add_to_transcript("assistant", fallback_message)
+                self.logger.info("✅ Fallback greeting sent successfully")
+            except Exception as fallback_error:
+                self.logger.error(f"Failed to send fallback greeting: {fallback_error}")
     
     def print_token_summary(self):
         """Print a comprehensive token usage summary for debugging purposes."""
@@ -822,6 +977,9 @@ class GeminiSession:
                     async with self.gemini_session as session:
                         self.gemini_session = session
                         self.logger.info("Gemini session connected")
+                        
+                        # Send dynamic initial greeting based on tenant configuration
+                        await self.send_dynamic_initial_greeting()
                         
                         # Create tasks for bidirectional streaming
                         async with asyncio.TaskGroup() as tg:
@@ -1652,6 +1810,11 @@ class ExotelGeminiBridge:
         """Start the WebSocket server."""
         self.logger.info(f"Starting multi-tenant Exotel-Gemini Bridge server on {self.host}:{self.port}{self.base_path}")
         self.logger.info(f"Server version: {websockets.__version__}")
+        
+        # Load tenant greeting configurations at startup
+        self.logger.info("Loading tenant greeting configurations at startup...")
+        await load_tenant_greeting_configs()
+        self.logger.info("Tenant greeting configurations loaded successfully")
         
         # Create a WebSocket server
         async def handler(websocket, path=None):
