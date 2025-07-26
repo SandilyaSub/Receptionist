@@ -27,7 +27,7 @@ import argparse
 from google import genai
 from google.genai import types
 
-GEMINI_API_KEY = "AIzaSyDmnCmel5kqMzi7ShnbNiYrcUxzA_kaDkM"
+GEMINI_API_KEY = "AIzaSyB0gFmcyraKYaNTjlTQp2P2VC4c_XJqp1M"
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -243,6 +243,16 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
+        
+        # Token accumulation tracking
+        self.conversation_tokens = []  # Store all usage_metadata from conversation
+        self.token_summary = {
+            "total_usage_reports": 0,
+            "total_tokens_sum": 0,
+            "input_tokens_sum": 0,
+            "output_tokens_sum": 0,
+            "response_breakdown_items": []
+        }
 
     async def send_text(self):
         while True:
@@ -359,6 +369,68 @@ class AudioLoop:
         while True:
             turn = self.session.receive()
             async for response in turn:
+                # ===== TOKEN LOGGING SECTION =====
+                # Check for usage_metadata and log all details
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    usage = response.usage_metadata
+                    
+                    # Store the usage metadata for accumulation
+                    self.conversation_tokens.append(usage)
+                    
+                    print("\n" + "="*80)
+                    print("🔍 USAGE METADATA DETECTED:")
+                    print(f"📊 Raw usage_metadata object: {usage}")
+                    print(f"📊 Usage metadata type: {type(usage)}")
+                    print(f"📊 Usage metadata attributes: {dir(usage)}")
+                    
+                    # Extract basic token counts
+                    total_tokens = getattr(usage, 'total_token_count', None)
+                    input_tokens = getattr(usage, 'input_token_count', None)
+                    output_tokens = getattr(usage, 'output_token_count', None)
+                    
+                    print(f"💰 BASIC TOKEN COUNTS:")
+                    print(f"   - Total tokens: {total_tokens}")
+                    print(f"   - Input tokens: {input_tokens}")
+                    print(f"   - Output tokens: {output_tokens}")
+                    
+                    # Accumulate tokens for summary
+                    self.token_summary["total_usage_reports"] += 1
+                    self.token_summary["total_tokens_sum"] += total_tokens if total_tokens else 0
+                    self.token_summary["input_tokens_sum"] += input_tokens if input_tokens else 0
+                    self.token_summary["output_tokens_sum"] += output_tokens if output_tokens else 0
+                    
+                    # Check for response breakdown
+                    if hasattr(usage, 'response_tokens_details'):
+                        print(f"🎯 RESPONSE BREAKDOWN:")
+                        print(f"   - response_tokens_details type: {type(usage.response_tokens_details)}")
+                        print(f"   - response_tokens_details: {usage.response_tokens_details}")
+                        
+                        if usage.response_tokens_details:
+                            for i, detail in enumerate(usage.response_tokens_details):
+                                print(f"   - Detail {i}: {detail}")
+                                print(f"     - Detail type: {type(detail)}")
+                                print(f"     - Detail attributes: {dir(detail)}")
+                                if hasattr(detail, 'modality'):
+                                    print(f"     - Modality: {detail.modality}")
+                                if hasattr(detail, 'token_count'):
+                                    print(f"     - Token count: {detail.token_count}")
+                                    # Add to summary
+                                    self.token_summary["response_breakdown_items"].append({
+                                        "modality": str(detail.modality),
+                                        "count": detail.token_count
+                                    })
+                    else:
+                        print(f"❌ No response_tokens_details found")
+                    
+                    # Check for any other token-related attributes
+                    print(f"🔍 OTHER ATTRIBUTES:")
+                    for attr in dir(usage):
+                        if 'token' in attr.lower() and not attr.startswith('_'):
+                            value = getattr(usage, attr, None)
+                            print(f"   - {attr}: {value} (type: {type(value)})")
+                    
+                    print("="*80 + "\n")
+                
                 if data := response.data:
                     self.audio_in_queue.put_nowait(data)
                     continue
@@ -371,6 +443,55 @@ class AudioLoop:
             # much more audio than has played yet.
             while not self.audio_in_queue.empty():
                 self.audio_in_queue.get_nowait()
+    
+    def print_token_summary(self):
+        """Print a comprehensive summary of all tokens consumed during the session"""
+        print("\n" + "="*100)
+        print("🎯 FINAL TOKEN CONSUMPTION SUMMARY")
+        print("="*100)
+        
+        print(f"📊 OVERVIEW:")
+        print(f"   - Total usage_metadata reports received: {self.token_summary['total_usage_reports']}")
+        print(f"   - Total conversation tokens accumulated: {self.token_summary['total_tokens_sum']}")
+        print(f"   - Total input tokens accumulated: {self.token_summary['input_tokens_sum']}")
+        print(f"   - Total output tokens accumulated: {self.token_summary['output_tokens_sum']}")
+        
+        print(f"\n🎯 RESPONSE BREAKDOWN DETAILS:")
+        if self.token_summary['response_breakdown_items']:
+            total_breakdown_tokens = 0
+            modality_counts = {}
+            for item in self.token_summary['response_breakdown_items']:
+                modality = item['modality']
+                count = item['count']
+                total_breakdown_tokens += count
+                if modality in modality_counts:
+                    modality_counts[modality] += count
+                else:
+                    modality_counts[modality] = count
+                print(f"   - {modality}: {count} tokens")
+            
+            print(f"\n📈 MODALITY SUMMARY:")
+            for modality, total_count in modality_counts.items():
+                print(f"   - {modality}: {total_count} tokens total")
+            print(f"   - Total tokens from breakdown: {total_breakdown_tokens}")
+        else:
+            print(f"   - No response breakdown data collected")
+        
+        print(f"\n💰 ESTIMATED COST CALCULATION (Gemini 2.5 Flash Native Audio):")
+        print(f"   - Input Audio Tokens: {self.token_summary['input_tokens_sum']} × $3.00/1M = ${self.token_summary['input_tokens_sum'] * 3.00 / 1000000:.6f}")
+        print(f"   - Output Audio Tokens: {self.token_summary['output_tokens_sum']} × $12.00/1M = ${self.token_summary['output_tokens_sum'] * 12.00 / 1000000:.6f}")
+        total_cost = (self.token_summary['input_tokens_sum'] * 3.00 + self.token_summary['output_tokens_sum'] * 12.00) / 1000000
+        print(f"   - TOTAL ESTIMATED COST: ${total_cost:.6f}")
+        
+        print(f"\n🔍 RAW DATA FOR ANALYSIS:")
+        print(f"   - Number of usage_metadata objects: {len(self.conversation_tokens)}")
+        for i, usage in enumerate(self.conversation_tokens):
+            total = getattr(usage, 'total_token_count', 'N/A')
+            input_tokens = getattr(usage, 'input_token_count', 'N/A')
+            output_tokens = getattr(usage, 'output_token_count', 'N/A')
+            print(f"   - Usage {i+1}: total={total}, input={input_tokens}, output={output_tokens}")
+        
+        print("="*100)
 
     async def play_audio(self):
         stream = await asyncio.to_thread(
@@ -410,10 +531,21 @@ class AudioLoop:
                 raise asyncio.CancelledError("User requested exit")
 
         except asyncio.CancelledError:
-            pass
+            print("\n👋 Session ended by user")
+        except KeyboardInterrupt:
+            print("\n👋 Session interrupted by user (Ctrl+C)")
         except ExceptionGroup as EG:
-            self.audio_stream.close()
+            if hasattr(self, 'audio_stream'):
+                self.audio_stream.close()
+            print("\n⚠️ Session ended with errors")
             traceback.print_exception(EG)
+        except Exception as e:
+            print(f"\n⚠️ Session ended with unexpected error: {e}")
+            traceback.print_exc()
+        finally:
+            # Always print token summary when session ends
+            print("\n📊 Generating token consumption summary...")
+            self.print_token_summary()
 
 
 if __name__ == "__main__":

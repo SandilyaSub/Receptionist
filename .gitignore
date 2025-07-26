@@ -22,6 +22,8 @@ __pycache__/
 call_details/
 client_debug_audio/
 
+Working_files_for_backup/
+
 # OS-specific
 .DS_Store
 
@@ -50,6 +52,10 @@ cookbook_test.py
 inspect_gemini_api.py
 
 Working Cookbook files/claude_whatsapp_service.py
+Working Cookbook files/Gemini_Live_actual_working_Jun24.py
+tenant_repository/happy_endings_bellandur/prompts/assistant copy.txt
+
+
 logs/transcript.json
 tenant_repository/bakery/prompts/assistant - older.txt
 tenant_repository/bakery/prompts/assistant copy 2.txt

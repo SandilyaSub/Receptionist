@@ -286,113 +286,16 @@ except Exception as e:
     logging.error(f"Failed to initialize Supabase client: {e}")
     supabase = None
 
-# Import language utilities
-from language_utils import map_language_to_bcp47_code
+# Tenant greeting configuration cache and language utilities removed
+# These were used for database-driven greeting system, now replaced with prompt parsing
 
-# Tenant greeting configuration cache
-tenant_greeting_cache = {}
-CACHE_LOADED = False
+# DEAD CODE REMOVED: load_tenant_greeting_configs()
+# This function was used for database-driven greeting system
+# Now replaced with prompt parsing in send_dynamic_initial_greeting()
 
-async def load_tenant_greeting_configs():
-    """Load all tenant greeting configurations into cache at startup.
-    
-    Returns:
-        dict: Tenant greeting configurations keyed by tenant_id
-    """
-    global tenant_greeting_cache, CACHE_LOADED
-    
-    if not supabase:
-        logging.warning("Supabase client not available, using empty greeting cache")
-        return {}
-    
-    try:
-        logging.info("Loading tenant greeting configurations...")
-        
-        # Fetch all active tenant greeting configs
-        response = supabase.table('tenant_configs').select(
-            'tenant_id, language, welcome_message'
-        ).eq('is_active', True).execute()
-        
-        if response.data:
-            for config in response.data:
-                tenant_id = config.get('tenant_id')
-                if tenant_id:
-                    # Map language to BCP-47 code for Gemini Live API
-                    language_bcp47 = map_language_to_bcp47_code(config.get('language', 'english'))
-                    welcome_message = config.get('welcome_message')
-                    
-                    tenant_greeting_cache[tenant_id] = {
-                        'language_bcp47': language_bcp47,
-                        'welcome_message': welcome_message
-                    }
-                    
-                    logging.info(f"Loaded greeting config for tenant '{tenant_id}': language_bcp47={language_bcp47}, has_custom_message={bool(welcome_message)}")
-            
-            CACHE_LOADED = True
-            logging.info(f"Successfully loaded {len(tenant_greeting_cache)} tenant greeting configurations")
-        else:
-            logging.warning("No tenant greeting configurations found in database")
-            
-    except Exception as e:
-        logging.error(f"Failed to load tenant greeting configurations: {e}")
-        # Don't raise exception - we'll use defaults
-    
-    return tenant_greeting_cache
-
-async def get_tenant_greeting_config(tenant_id: str) -> dict:
-    """Get greeting configuration for a specific tenant.
-    
-    Args:
-        tenant_id: The tenant identifier
-        
-    Returns:
-        dict: Greeting configuration with 'language' and 'welcome_message' keys
-    """
-    global tenant_greeting_cache, CACHE_LOADED
-    
-    # If cache not loaded yet, try to load it
-    if not CACHE_LOADED:
-        await load_tenant_greeting_configs()
-    
-    # Check cache first
-    if tenant_id in tenant_greeting_cache:
-        config = tenant_greeting_cache[tenant_id]
-        logging.info(f"Found cached greeting config for tenant '{tenant_id}': {config}")
-        return config
-    
-    # If not in cache, try to fetch from database
-    if supabase:
-        try:
-            logging.info(f"Fetching greeting config for tenant '{tenant_id}' from database...")
-            response = supabase.table('tenant_configs').select(
-                'language, welcome_message'
-            ).eq('tenant_id', tenant_id).eq('is_active', True).execute()
-            
-            if response.data:
-                config_data = response.data[0]
-                language_bcp47 = map_language_to_bcp47_code(config_data.get('language', 'english'))
-                welcome_message = config_data.get('welcome_message')
-                
-                config = {
-                    'language_bcp47': language_bcp47,
-                    'welcome_message': welcome_message
-                }
-                
-                # Cache the result
-                tenant_greeting_cache[tenant_id] = config
-                logging.info(f"Fetched and cached greeting config for tenant '{tenant_id}': {config}")
-                return config
-        except Exception as e:
-            logging.error(f"Failed to fetch greeting config for tenant '{tenant_id}': {e}")
-    
-    # Fallback to defaults
-    default_config = {
-        'language_bcp47': 'en-US',
-        'welcome_message': None
-    }
-    
-    logging.info(f"Using default greeting config for tenant '{tenant_id}': {default_config}")
-    return default_config
+# DEAD CODE REMOVED: get_tenant_greeting_config()
+# This function was used for database-driven greeting system
+# Now replaced with prompt parsing in send_dynamic_initial_greeting()
 
 # Create a custom filter to filter out specific log messages
 class NonTextPartsFilter(logging.Filter):
@@ -1860,10 +1763,9 @@ class ExotelGeminiBridge:
         self.logger.info(f"Starting multi-tenant Exotel-Gemini Bridge server on {self.host}:{self.port}{self.base_path}")
         self.logger.info(f"Server version: {websockets.__version__}")
         
-        # Load tenant greeting configurations at startup
-        self.logger.info("Loading tenant greeting configurations at startup...")
-        await load_tenant_greeting_configs()
-        self.logger.info("Tenant greeting configurations loaded successfully")
+        # DEAD CODE REMOVED: Tenant greeting configurations startup loading
+        # This was used for database-driven greeting system, now replaced with prompt parsing
+        self.logger.info("Server startup: Using prompt-based greeting system (no cache loading needed)")
         
         # Create a WebSocket server
         async def handler(websocket, path=None):
