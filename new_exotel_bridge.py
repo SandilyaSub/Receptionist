@@ -760,29 +760,78 @@ class GeminiSession:
             self.logger.error(f"Error extracting conversation tokens for session {self.session_id}: {str(e)}")
             return None
 
-    async def send_dynamic_initial_greeting(self):
-        """Send tenant-specific initial greeting based on cached configuration."""
-        try:
-            # Get tenant-specific greeting configuration
-            greeting_config = await get_tenant_greeting_config(self.tenant)
+    def extract_greeting_from_prompt(self, prompt_text):
+        """Extract greeting message from system prompt text.
+        
+        Args:
+            prompt_text: The system prompt content
             
-            # Determine the welcome message
-            if greeting_config.get('welcome_message'):
-                greeting_message = greeting_config['welcome_message']
-                self.logger.info(f"Using custom welcome message for tenant '{self.tenant}': {greeting_message}")
+        Returns:
+            Extracted greeting message or fallback
+        """
+        try:
+            # Look for common greeting patterns in prompts
+            patterns = [
+                # Pattern 1: "Namaste! Welcome to..." (bakery style)
+                r'"(Namaste!\s+Welcome\s+to[^"]+)"',
+                # Pattern 2: "Namaste! This is Aarohi from..." (saloon style)
+                r'"(Namaste!\s+This\s+is\s+Aarohi[^"]+)"',
+                # Pattern 3: "Namaste! You've reached..." (joy_invite style)
+                r'"(Namaste!\s+You\'ve\s+reached[^"]+)"',
+                # Pattern 4: Any quoted greeting starting with Namaste
+                r'"(Namaste![^"]+)"',
+                # Pattern 5: SAMPLE INTERACTION FLOW pattern
+                r'SAMPLE\s+INTERACTION\s+FLOW:\s*"([^"]+)"',
+                # Pattern 6: Default greeting pattern
+                r'start\s+with:\s*"([^"]+)"',
+                r'greet\s+with:\s*"([^"]+)"'
+            ]
+            
+            for pattern in patterns:
+                import re
+                match = re.search(pattern, prompt_text, re.IGNORECASE | re.DOTALL)
+                if match:
+                    greeting = match.group(1).strip()
+                    self.logger.info(f"Extracted greeting from prompt: {greeting}")
+                    return greeting
+            
+            # If no pattern matches, look for any greeting instruction
+            # Look for lines containing greeting-related keywords
+            lines = prompt_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                if any(keyword in line.lower() for keyword in ['greeting', 'welcome', 'namaste', 'hello']):
+                    # Try to extract quoted text from this line
+                    quote_match = re.search(r'"([^"]+)"', line)
+                    if quote_match:
+                        greeting = quote_match.group(1).strip()
+                        self.logger.info(f"Found greeting in line: {greeting}")
+                        return greeting
+            
+            self.logger.warning(f"No greeting pattern found in prompt for tenant '{self.tenant}'")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting greeting from prompt: {e}")
+            return None
+    
+    async def send_dynamic_initial_greeting(self):
+        """Send tenant-specific initial greeting extracted from system prompt."""
+        try:
+            # Load the same prompt that's used in Gemini configuration
+            prompt_text = load_system_prompt(self.tenant)
+            
+            # Extract greeting from the prompt
+            greeting_message = self.extract_greeting_from_prompt(prompt_text)
+            
+            # Use extracted greeting or fallback
+            if greeting_message:
+                self.logger.info(f"Using extracted greeting for tenant '{self.tenant}': {greeting_message}")
             else:
                 greeting_message = "Hello there. My name is Aarohi. How may I help you today?"
-                self.logger.info(f"Using default welcome message for tenant '{self.tenant}': {greeting_message}")
-            
-            # Log the BCP-47 language code (for future voice configuration)
-            language_bcp47 = greeting_config.get('language_bcp47', 'en-US')
-            self.logger.info(f"Tenant '{self.tenant}' language BCP-47 code: {language_bcp47}")
-            
-            # Note: In the future, we could use language_bcp47 to configure Gemini voice
-            # For now, we use the default voice but log the language for reference
+                self.logger.info(f"Using fallback greeting for tenant '{self.tenant}': {greeting_message}")
             
             # Send the greeting message to Gemini
-            # Note: The language_bcp47 could be used for voice configuration in future updates
             await self.gemini_session.send_client_content(
                 turns={"parts": [{"text": greeting_message}]}
             )
