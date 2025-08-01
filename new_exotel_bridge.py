@@ -18,6 +18,7 @@ import sys
 from datetime import datetime
 from typing import Dict, Optional
 import httpx
+from call_timeout_manager import CallTimeoutManager, CallTerminationMessages, detect_language_from_text
 
 
 # Directory to store call transcripts
@@ -526,12 +527,16 @@ class GeminiSession:
         # Initialize transcript manager (will be properly set up after we get call_sid)
         self.transcript_manager = None
         
+        # Initialize timeout manager for call duration and inactivity monitoring
+        self.timeout_manager = CallTimeoutManager()
+        self.termination_messages = CallTerminationMessages()
+        
         # Audio buffer for combining chunks before sending to client
         self.audio_buffer = bytearray()
         self.buffer_threshold = 3840  # Smaller buffer, but still above Exotel's minimum (multiple of 320 bytes)
         self.min_chunk_size = 3840    # Ensure we never send less than this
         self.last_buffer_process_time = time.time()
-        self.last_buffer_send_time = time.time()  # Initialize missing attribute
+        self.last_buffer_send_time = time.time()  
         self.buffer_time_threshold = 0.1  # Reduced time threshold for faster processing of short utterances
         
         # Will be detected from first audio chunk
@@ -943,6 +948,12 @@ class GeminiSession:
                             
                             # Task 3: Send keep-alive messages to prevent Exotel from timing out
                             tg.create_task(self.send_keep_alive_messages())
+                            
+                            # Task 4: Monitor for inactivity timeout
+                            tg.create_task(self.monitor_inactivity_timeout())
+                            
+                            # Task 5: Monitor for maximum call duration
+                            tg.create_task(self.monitor_call_duration())
                 finally:
                     # Always call cleanup to ensure transcript is saved
                     try:
@@ -1090,6 +1101,9 @@ class GeminiSession:
                         elif data["event"] == "media":
                             # Process incoming audio data
                             if "media" in data and "payload" in data["media"]:
+                                # Update user activity for timeout monitoring
+                                self.timeout_manager.update_user_activity()
+                                
                                 # Decode base64 audio data
                                 audio_data = base64.b64decode(data["media"]["payload"])
                                 sample_rate = data["media"].get("rate", 8000)  # Default to 8kHz if not specified
@@ -1276,6 +1290,13 @@ class GeminiSession:
                                 if has_input and response.server_content.input_transcription:
                                     self.logger.debug(f"Input transcription detected: {response.server_content.input_transcription}")
                                     user_text = response.server_content.input_transcription.text
+                                    
+                                    # Detect language from user input for timeout messages
+                                    detected_lang = detect_language_from_text(user_text)
+                                    if detected_lang:
+                                        self.timeout_manager.set_detected_language(detected_lang)
+                                        self.logger.debug(f"Language detected from user input: {detected_lang}")
+                                    
                                     # User transcript is now handled by TranscriptManager
                                     if self.transcript_manager:
                                         self.transcript_manager.add_to_transcript("user", user_text)
@@ -1534,6 +1555,98 @@ class GeminiSession:
         """Triggers the non-blocking, asynchronous cleanup process."""
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
         asyncio.create_task(self.run_post_call_processing())
+    
+    async def monitor_inactivity_timeout(self):
+        """Monitor for inactivity timeout (>2 minutes)."""
+        try:
+            while not self.timeout_manager.is_terminated:
+                await asyncio.sleep(10)  # Check every 10 seconds
+                
+                if self.timeout_manager.should_terminate_for_inactivity():
+                    self.logger.info(f"Inactivity timeout detected: {self.timeout_manager.get_inactivity_duration():.1f}s")
+                    await self._handle_timeout_termination("inactivity_timeout")
+                    break
+        except asyncio.CancelledError:
+            self.logger.debug("Inactivity monitoring task cancelled")
+        except Exception as e:
+            self.logger.error(f"Error in inactivity monitoring: {e}")
+    
+    async def monitor_call_duration(self):
+        """Monitor for maximum call duration (>10 minutes)."""
+        try:
+            while not self.timeout_manager.is_terminated:
+                await asyncio.sleep(30)  # Check every 30 seconds
+                
+                if self.timeout_manager.should_terminate_for_duration():
+                    self.logger.info(f"Maximum call duration exceeded: {self.timeout_manager.get_call_duration():.1f}s")
+                    await self._handle_timeout_termination("duration_exceeded")
+                    break
+        except asyncio.CancelledError:
+            self.logger.debug("Duration monitoring task cancelled")
+        except Exception as e:
+            self.logger.error(f"Error in duration monitoring: {e}")
+    
+    async def _handle_timeout_termination(self, reason: str):
+        """Handle timeout-based call termination."""
+        if self.timeout_manager.is_terminated:
+            return  # Already terminated
+        
+        self.timeout_manager.is_terminated = True
+        self.logger.info(f"Initiating call termination due to: {reason}")
+        
+        # Get appropriate exit message based on detected language
+        if reason == "inactivity_timeout":
+            exit_message = self.termination_messages.get_inactivity_message(
+                self.timeout_manager.detected_language
+            )
+        else:  # duration_exceeded
+            exit_message = self.termination_messages.get_duration_message(
+                self.timeout_manager.detected_language
+            )
+        
+        self.logger.info(f"Exit message ({self.timeout_manager.detected_language}): {exit_message}")
+        
+        # Send exit message to Gemini to speak
+        await self._send_termination_message_to_gemini(exit_message, reason)
+        
+        # Wait a moment for the message to be spoken, then close
+        await asyncio.sleep(3)
+        await self._close_session_gracefully()
+    
+    async def _send_termination_message_to_gemini(self, exit_message: str, reason: str):
+        """Send termination message to Gemini to speak before closing."""
+        try:
+            if hasattr(self, 'gemini_session') and self.gemini_session:
+                # Create a system instruction to speak the exit message
+                termination_instruction = {
+                    "role": "user",
+                    "content": f"SYSTEM_INSTRUCTION: Say this exact message and then end the call: '{exit_message}'"
+                }
+                
+                # Send to Gemini
+                await self.gemini_session.send(termination_instruction)
+                self.logger.info(f"Termination message sent to Gemini for reason: {reason}")
+        except Exception as e:
+            self.logger.error(f"Error sending termination message to Gemini: {e}")
+    
+    async def _close_session_gracefully(self):
+        """Clean up and close the session gracefully."""
+        try:
+            self.logger.info("Closing session gracefully after timeout")
+            
+            # Close WebSocket connections
+            if hasattr(self, 'websocket') and self.websocket:
+                await self.websocket.close()
+            
+            # Close Gemini session
+            if hasattr(self, 'gemini_session') and self.gemini_session:
+                await self.gemini_session.close()
+                
+            # Trigger cleanup to save transcript and run analysis
+            self.cleanup()
+            
+        except Exception as e:
+            self.logger.error(f"Error during graceful session close: {e}")
 
     async def run_post_call_processing(self):
         """Runs all post-call tasks in the background without blocking."""
