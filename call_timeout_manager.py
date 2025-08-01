@@ -43,6 +43,13 @@ class CallTimeoutManager:
             self.detected_language = language.lower()
             logger.debug(f"Language updated to: {self.detected_language}")
     
+    def reset_timers(self):
+        """Reset all timers to current time. Call this when the call officially starts."""
+        current_time = time.time()
+        self.call_start_time = current_time
+        self.last_user_input_time = current_time
+        logger.info("All timeout timers reset to current time")
+    
     def get_inactivity_duration(self) -> float:
         """Get current inactivity duration in seconds."""
         return time.time() - self.last_user_input_time

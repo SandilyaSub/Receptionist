@@ -748,6 +748,11 @@ class GeminiSession:
             if self.transcript_manager:
                 self.transcript_manager.add_to_transcript("assistant", greeting_message)
             
+            # Reset timeout manager now that the call has actually started
+            # This ensures inactivity timer starts from when greeting is sent, not from session creation
+            self.timeout_manager.reset_timers()
+            self.logger.info("Timeout manager reset - call officially started after greeting")
+            
             self.logger.info(f"✅ Dynamic initial greeting sent successfully for tenant '{self.tenant}'")
             
         except Exception as e:
@@ -1636,7 +1641,11 @@ class GeminiSession:
             
             # Close WebSocket connections
             if hasattr(self, 'websocket') and self.websocket:
-                await self.websocket.close()
+                self.logger.info("Closing Exotel WebSocket connection due to timeout")
+                await self.websocket.close(code=1000, reason="Call terminated due to timeout")
+                self.logger.info("Exotel WebSocket connection closed successfully")
+            else:
+                self.logger.warning("No WebSocket connection found to close")
             
             # Close Gemini session
             if hasattr(self, 'gemini_session') and self.gemini_session:

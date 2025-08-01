@@ -1,0 +1,11 @@
+{
+  "tenant_id": "sreedevi_dental_data_first",
+  "business_name": "Sreedevi Skin & Dental Hospital",
+  "generation_timestamp": "2025-07-29T23:07:26.376888",
+  "quality_score": 0.9400000000000001,
+  "validation_notes": [
+    "Generated using data-first approach with Claude"
+  ],
+  "business_type": "other",
+  "location": "Rajahmundry"
+}

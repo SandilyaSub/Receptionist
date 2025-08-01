@@ -1,0 +1,11 @@
+{
+  "tenant_id": "sreedevi_dental_rjy",
+  "business_name": "Sreedevi Dental Clinic",
+  "generation_timestamp": "2025-07-29T14:28:43.473678",
+  "quality_score": 0.7,
+  "validation_notes": [
+    "Generated from template without LLM refinement"
+  ],
+  "business_type": "healthcare",
+  "location": "Rajahmundry"
+}
