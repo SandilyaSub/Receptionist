@@ -15,7 +15,7 @@ __pycache__/
 # Environment variables
 .env
 .env.*
-.gitignore
+
 
 # Logs and data
 *.log
@@ -50,6 +50,8 @@ test_client.js
 test_conversation.js
 cookbook_test.py
 inspect_gemini_api.py
+
+Working_Cookbook_files/
 
 Working Cookbook files/claude_whatsapp_service.py
 Working Cookbook files/Gemini_Live_actual_working_Jun24.py
