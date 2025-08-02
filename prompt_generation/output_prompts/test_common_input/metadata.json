@@ -1,0 +1,11 @@
+{
+  "tenant_id": "test_common_input",
+  "business_name": "Sreedevi Skin & Dental Hospital",
+  "generation_timestamp": "2025-08-02T14:30:43.284813",
+  "quality_score": 0.6,
+  "validation_notes": [
+    "Generated from template (fallback - LLM not available or failed)"
+  ],
+  "business_type": "other",
+  "location": "Rajahmundry"
+}

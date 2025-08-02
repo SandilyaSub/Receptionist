@@ -78,6 +78,22 @@ Dentures:
 Implants:
 - Surgical Placement of Dental Implant under LA: ₹18,000-40,000
 
+Skin Treatment Pricing 
+
+Dermatologist Consultation- 300-500Rs
+Microdermabrasion 2500 Rs per session
+Dermaroller 3500 Rs per session
+Dermaroller + PRP - face 4500 Rs per session For hair 4500 rs per session
+Chemical Peels 1500 to 3000 Rs per session
+LASER Hair Removal on face 1500 to 5000 Rs per session Body 6000 to 10000 rs per session 
+Injectables for Hair Loss 4500 Rs per session
+Mole Removal 500-5000 Rs
+Skin Tag Removal 500- 6000 Rs
+Scar Removal 1000-10,000 rs 
+Tattoo Removal 2000-15000 Rs
+Carbon peel n Glow toning Qs Nd-YAG 4000 to 6000 Rs per session
+Skin Biopsy2000 Rs
+
 Process -
 Appointment should be booked by walking in directly to the clinic any other through phone call will be considered as special card , also if anyone cannot wait for their turn they can take special card at the counter
 
@@ -105,7 +121,6 @@ languages: Telugu, English, Hindi
 business_description: Premier dental care clinic providing comprehensive oral health services
 special_instructions: 
 
-
 Insurance is not available for both dental and skin
 But EHS is Available in dental for Government employees of Andhra Pradesh
 
@@ -114,12 +129,10 @@ For dermatology Dr Sridevi handle all problems related to skin, hair and nails, 
 For dental Dr Venugopal Reddy studied BDS and MDS in prosthodontics and crown and bridge, with an experience of 16 years
 And Dr Santoshi BDS cosmetic dentist with an experience of 12 years , helps in dental works.
 
-
 In our clinic walk in appointments are more encouraged as it makes the patient get the appointment according to the order of entering the clinic. Appointment can be taken before with the special card or even special card can be taken at the time coming to the hospital.
 Dental appointment are scheduled previously only , so new cases will be checked and given appointment, if time slot is available at that time , treatment can be done on that day also.
 Address - Door Number 46-20-2/1 , Ground floor; chinna anjaneya swamy temple street, near Dhanantri blood bank Rajahmundry - 533103
 
-
-
 appointment_required: true
-welcome_message: "నమస్కారం! శ్రీదేవి స్కిన్ & డెంటల్ హాస్పిటల్‌కు స్వాగతం. నేను ఆరోహి. మీ పేరు మరియు ఫోన్ నంబర్ చెప్పగలరా?" (Namaskaram! Sreedevi Skin & Dental Hospital ki swagatam. Nenu Aarohi. Mee peru mariyu phone number cheppagalara? - "Hello! Welcome to Sreedevi Skin & Dental Hospital. I am Aarohi. Could you please tell me your name and phone number?")
+welcome_message: 
+Always begin conversations with: "నమస్కారం! శ్రీదేవి స్కిన్ & డెంటల్ హాస్పిటల్‌కు స్వాగతం. నేను ఆరోహి. నేను మీకు ఏ విధముగా సహాయపడగలను ?" (Namaskaram! Sreedevi Skin & Dental Hospital ki swagatam. Nenu Aarohi. Nenu miku ye vidhamuga sahayapadagalnu? - "Hello! Welcome to Sreedevi Skin & Dental Hospital. I am Aarohi. How can I help you today?")

@@ -54,11 +54,30 @@ class ClaudePromptRefiner:
         
         return exemplars
     
-    def _create_data_first_prompt(self, business_input_text: str) -> str:
-        """Create the data-first prompt for Claude using raw business input and common instructions."""
+    def _load_common_instructions(self) -> str:
+        """Load common instructions from file with fallback to hardcoded backup."""
         
-        # Common instructions provided by the user
-        common_instructions = """
+        # Try to load from common_input.txt file
+        try:
+            common_input_path = os.path.join(os.path.dirname(__file__), "common_input.txt")
+            with open(common_input_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:  # Ensure file is not empty
+                    print("✅ Loaded common instructions from common_input.txt")
+                    return content
+                else:
+                    print("⚠️ common_input.txt is empty, using hardcoded fallback")
+                    return self._get_hardcoded_common_instructions()
+        except FileNotFoundError:
+            print("⚠️ common_input.txt not found, using hardcoded fallback")
+            return self._get_hardcoded_common_instructions()
+        except Exception as e:
+            print(f"⚠️ Error reading common_input.txt: {e}, using hardcoded fallback")
+            return self._get_hardcoded_common_instructions()
+    
+    def _get_hardcoded_common_instructions(self) -> str:
+        """Hardcoded fallback common instructions (union of code + file content)."""
+        return """
 Core Identity & Voice
 * Consistent Persona: "You are Aarohi, a warm and professional/enthusiastic receptionist for [Business Name]"
 * Indian Cultural Context: Natural Indian English accent, use of "Namaste", cultural sensitivity
@@ -78,7 +97,19 @@ Cultural & Regional Adaptations
 * Honorifics: Appropriate use of "ji", "sir", "madam" based on context
 * Regional Expressions: Adapt to local cultural expressions and formality levels
 * Business-Specific Greetings: Start of with the opening sentence provided in the attachment. If one is not provided , then state the opening line - " Namaste ! Thank you for calling [Business_Name] . My name is Aarohi. How can I help you today ? ". Remember that the opening line should be in the first language mentioned in [languages]
+
+PHONE NUMBER HANDLING:
+* Do NOT explicitly ask customers for their phone number during the conversation
+* If a customer voluntarily shares their phone number, simply acknowledge with: "Thank you, I have noted your number" - do not repeat the number back to them
+* If customers ask how they will receive messages/payment links without sharing their number, respond: "Our system has caller ID enabled so we can pick this up from there"
+* If they continue asking what their number is, respond: "I cannot share it here for privacy reasons, but don't worry, we have it figured out"
 """
+    
+    def _create_data_first_prompt(self, business_input_text: str) -> str:
+        """Create the data-first prompt for Claude using raw business input and common instructions."""
+        
+        # Load common instructions from file or fallback
+        common_instructions = self._load_common_instructions()
         
         data_first_prompt = f"""You are a world class system instructions generator and you are building system instructions for the best in class AI voice agent.
 
