@@ -1560,13 +1560,27 @@ class GeminiSession:
         
         # Start the monitoring task
         self.inactivity_timer_task = asyncio.create_task(self.monitor_inactivity())
-        self.logger.info("Inactivity monitoring started - 90 second timeout active")
+        
+        # Enhanced logging with task verification
+        task_id = id(self.inactivity_timer_task)
+        self.logger.info(f"🔄 Inactivity monitoring started - 90s timeout active (task ID: {task_id})")
+        
+        # Verify task is actually running
+        if self.inactivity_timer_task.done():
+            self.logger.error(f"⚠️ Inactivity monitoring task failed to start properly!")
+        else:
+            self.logger.debug(f"✅ Inactivity monitoring task confirmed running")
 
     def reset_inactivity_timer(self):
         """Reset the inactivity timer when user activity is detected."""
         if self.timeout_monitoring_active:
+            old_time = self.last_user_activity_time
             self.last_user_activity_time = time.time()
-            self.logger.debug("User activity detected - inactivity timer reset")
+            
+            # Only log if significant time has passed (avoid spam during continuous speech)
+            if old_time is None or (time.time() - old_time) > 2.0:
+                gap = "initial" if old_time is None else f"{time.time() - old_time:.1f}s"
+                self.logger.debug(f"🔄 User activity detected - inactivity timer reset (gap: {gap})")
 
     def stop_inactivity_monitoring(self):
         """Stop inactivity monitoring."""
@@ -1577,13 +1591,23 @@ class GeminiSession:
 
     async def monitor_inactivity(self):
         """Background task to monitor user inactivity and trigger timeout."""
+        last_log_time = 0
+        check_count = 0
+        
         try:
+            self.logger.info("🔄 Inactivity monitoring task started and running")
+            
             while self.timeout_monitoring_active:
                 if self.last_user_activity_time:
                     inactive_duration = time.time() - self.last_user_activity_time
+                    check_count += 1
+                    
+                    # Log every 30 seconds (6 checks) to avoid spam
+                    if check_count % 6 == 0:
+                        self.logger.debug(f"Inactivity check #{check_count}: {inactive_duration:.1f}s since last activity")
                     
                     if inactive_duration >= self.INACTIVITY_TIMEOUT:
-                        self.logger.info(f"User inactive for {inactive_duration:.1f} seconds - triggering timeout termination")
+                        self.logger.info(f"🚨 TIMEOUT TRIGGERED: User inactive for {inactive_duration:.1f} seconds")
                         
                         # Trigger graceful termination with timeout message
                         await self.terminate_call_gracefully(
@@ -1591,6 +1615,9 @@ class GeminiSession:
                             termination_reason="inactivity_timeout"
                         )
                         break
+                else:
+                    # This should never happen, but log if it does
+                    self.logger.warning("⚠️ Inactivity monitoring: last_user_activity_time is None")
                 
                 # Check every 5 seconds
                 await asyncio.sleep(5.0)
@@ -1599,6 +1626,8 @@ class GeminiSession:
             self.logger.info("Inactivity monitoring task cancelled")
         except Exception as e:
             self.logger.error(f"Error in inactivity monitoring: {e}")
+        finally:
+            self.logger.info(f"🔄 Inactivity monitoring task ended after {check_count} checks")
     
     # Default termination message
     DEFAULT_TERMINATION_MESSAGE = "Many apologies. Terminating the call now."
