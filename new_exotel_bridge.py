@@ -1555,8 +1555,13 @@ class GeminiSession:
     
     def start_inactivity_monitoring(self):
         """Start monitoring for user inactivity."""
-        self.last_user_activity_time = time.time()
+        # DIAGNOSTIC: Log timer initialization
+        init_time = time.time()
+        self.last_user_activity_time = init_time
         self.timeout_monitoring_active = True
+        
+        self.logger.info(f"🔄 DIAGNOSTIC: Timer initialized at {init_time} (last_user_activity_time = {self.last_user_activity_time})")
+        self.logger.info(f"🔄 DIAGNOSTIC: timeout_monitoring_active = {self.timeout_monitoring_active}")
         
         # Start the monitoring task
         self.inactivity_timer_task = asyncio.create_task(self.monitor_inactivity())
@@ -1570,6 +1575,9 @@ class GeminiSession:
             self.logger.error(f"⚠️ Inactivity monitoring task failed to start properly!")
         else:
             self.logger.debug(f"✅ Inactivity monitoring task confirmed running")
+            
+        # DIAGNOSTIC: Verify values after task creation
+        self.logger.info(f"🔄 DIAGNOSTIC: After task creation - last_user_activity_time = {self.last_user_activity_time}, monitoring_active = {self.timeout_monitoring_active}")
 
     def reset_inactivity_timer(self):
         """Reset the inactivity timer when user activity is detected."""
@@ -1597,14 +1605,28 @@ class GeminiSession:
         try:
             self.logger.info("🔄 Inactivity monitoring task started and running")
             
+            # DIAGNOSTIC: Log initial state
+            self.logger.info(f"🔄 DIAGNOSTIC: Initial state - last_user_activity_time = {self.last_user_activity_time}, timeout_monitoring_active = {self.timeout_monitoring_active}")
+            
             while self.timeout_monitoring_active:
+                check_count += 1
+                current_time = time.time()
+                
+                # DIAGNOSTIC: Log every single check for first 20 checks, then every 6th
+                should_log_detailed = check_count <= 20 or check_count % 6 == 0
+                
+                if should_log_detailed:
+                    self.logger.info(f"🔄 DIAGNOSTIC: Check #{check_count} - current_time = {current_time}, last_user_activity_time = {self.last_user_activity_time}")
+                
                 if self.last_user_activity_time:
-                    inactive_duration = time.time() - self.last_user_activity_time
-                    check_count += 1
+                    inactive_duration = current_time - self.last_user_activity_time
+                    
+                    if should_log_detailed:
+                        self.logger.info(f"🔄 DIAGNOSTIC: Check #{check_count} - inactive_duration = {inactive_duration:.1f}s, TIMEOUT = {self.INACTIVITY_TIMEOUT}s")
                     
                     # Log every 30 seconds (6 checks) to avoid spam
                     if check_count % 6 == 0:
-                        self.logger.debug(f"Inactivity check #{check_count}: {inactive_duration:.1f}s since last activity")
+                        self.logger.info(f"Inactivity check #{check_count}: {inactive_duration:.1f}s since last activity")
                     
                     if inactive_duration >= self.INACTIVITY_TIMEOUT:
                         self.logger.info(f"🚨 TIMEOUT TRIGGERED: User inactive for {inactive_duration:.1f} seconds")
@@ -1617,7 +1639,7 @@ class GeminiSession:
                         break
                 else:
                     # This should never happen, but log if it does
-                    self.logger.warning("⚠️ Inactivity monitoring: last_user_activity_time is None")
+                    self.logger.warning(f"⚠️ DIAGNOSTIC: Check #{check_count} - last_user_activity_time is None!")
                 
                 # Check every 5 seconds
                 await asyncio.sleep(5.0)
