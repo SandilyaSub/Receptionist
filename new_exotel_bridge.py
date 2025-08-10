@@ -540,6 +540,16 @@ class GeminiSession:
         
         # Conversation token tracking
         self.conversation_tokens = []  # Store all usage_metadata from conversation
+        
+        # Inactivity timeout configuration
+        self.INACTIVITY_TIMEOUT = 90.0  # 90 seconds
+        self.TIMEOUT_MESSAGE = ("Sorry. We have not heard anything from you for the last 90 seconds, "
+                               "ending the call right now. Please call us back if you would like to use our services")
+        
+        # Timer state management
+        self.last_user_activity_time = None
+        self.inactivity_timer_task = None
+        self.timeout_monitoring_active = False
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
@@ -742,7 +752,10 @@ class GeminiSession:
             # Add to transcript
             if self.transcript_manager:
                 self.transcript_manager.add_to_transcript("assistant", greeting_message)
-            
+        
+            # Start inactivity monitoring after greeting is sent
+            self.start_inactivity_monitoring()
+        
             self.logger.info(f"✅ Dynamic initial greeting sent successfully for tenant '{self.tenant}'")
             
         except Exception as e:
@@ -755,6 +768,10 @@ class GeminiSession:
                 )
                 if self.transcript_manager:
                     self.transcript_manager.add_to_transcript("assistant", fallback_message)
+                
+                # Start inactivity monitoring after fallback greeting is sent
+                self.start_inactivity_monitoring()
+                
                 self.logger.info("✅ Fallback greeting sent successfully")
             except Exception as fallback_error:
                 self.logger.error(f"Failed to send fallback greeting: {fallback_error}")
@@ -1090,6 +1107,9 @@ class GeminiSession:
                         elif data["event"] == "media":
                             # Process incoming audio data
                             if "media" in data and "payload" in data["media"]:
+                                # Reset inactivity timer - user is speaking
+                                self.reset_inactivity_timer()
+                                
                                 # Decode base64 audio data
                                 audio_data = base64.b64decode(data["media"]["payload"])
                                 sample_rate = data["media"].get("rate", 8000)  # Default to 8kHz if not specified
@@ -1536,6 +1556,53 @@ class GeminiSession:
         finally:
             self.logger.info(f"Keep-alive task ended. Sent {keep_alive_counter} messages, {consecutive_failures} consecutive failures at end.")
     
+    def start_inactivity_monitoring(self):
+        """Start monitoring for user inactivity."""
+        self.last_user_activity_time = time.time()
+        self.timeout_monitoring_active = True
+        
+        # Start the monitoring task
+        self.inactivity_timer_task = asyncio.create_task(self.monitor_inactivity())
+        self.logger.info("Inactivity monitoring started - 90 second timeout active")
+
+    def reset_inactivity_timer(self):
+        """Reset the inactivity timer when user activity is detected."""
+        if self.timeout_monitoring_active:
+            self.last_user_activity_time = time.time()
+            self.logger.debug("User activity detected - inactivity timer reset")
+
+    def stop_inactivity_monitoring(self):
+        """Stop inactivity monitoring."""
+        self.timeout_monitoring_active = False
+        if self.inactivity_timer_task and not self.inactivity_timer_task.done():
+            self.inactivity_timer_task.cancel()
+            self.logger.info("Inactivity monitoring stopped")
+
+    async def monitor_inactivity(self):
+        """Background task to monitor user inactivity and trigger timeout."""
+        try:
+            while self.timeout_monitoring_active:
+                if self.last_user_activity_time:
+                    inactive_duration = time.time() - self.last_user_activity_time
+                    
+                    if inactive_duration >= self.INACTIVITY_TIMEOUT:
+                        self.logger.info(f"User inactive for {inactive_duration:.1f} seconds - triggering timeout termination")
+                        
+                        # Trigger graceful termination with timeout message
+                        await self.terminate_call_gracefully(
+                            farewell_message=self.TIMEOUT_MESSAGE,
+                            termination_reason="inactivity_timeout"
+                        )
+                        break
+                
+                # Check every 5 seconds
+                await asyncio.sleep(5.0)
+                
+        except asyncio.CancelledError:
+            self.logger.info("Inactivity monitoring task cancelled")
+        except Exception as e:
+            self.logger.error(f"Error in inactivity monitoring: {e}")
+    
     # Default termination message
     DEFAULT_TERMINATION_MESSAGE = "Many apologies. Terminating the call now."
     
@@ -1715,6 +1782,10 @@ class GeminiSession:
     def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
+        
+        # Stop inactivity monitoring when call ends
+        self.stop_inactivity_monitoring()
+        
         asyncio.create_task(self.run_post_call_processing())
 
     async def run_post_call_processing(self):
