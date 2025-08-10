@@ -753,9 +753,6 @@ class GeminiSession:
             if self.transcript_manager:
                 self.transcript_manager.add_to_transcript("assistant", greeting_message)
         
-            # Start inactivity monitoring after greeting is sent
-            self.start_inactivity_monitoring()
-        
             self.logger.info(f"✅ Dynamic initial greeting sent successfully for tenant '{self.tenant}'")
             
         except Exception as e:
@@ -769,12 +766,12 @@ class GeminiSession:
                 if self.transcript_manager:
                     self.transcript_manager.add_to_transcript("assistant", fallback_message)
                 
-                # Start inactivity monitoring after fallback greeting is sent
-                self.start_inactivity_monitoring()
-                
                 self.logger.info("✅ Fallback greeting sent successfully")
             except Exception as fallback_error:
                 self.logger.error(f"Failed to send fallback greeting: {fallback_error}")
+        
+        # ALWAYS start inactivity monitoring after greeting attempt (regardless of success/failure)
+        self.start_inactivity_monitoring()
     
     def print_token_summary(self):
         """Print a comprehensive token usage summary for debugging purposes."""
