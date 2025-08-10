@@ -1314,6 +1314,12 @@ class GeminiSession:
                                 
                                 if send_audio:
                                     await self._send_audio_to_exotel()
+                                    
+                                # Check if we're in termination mode and this might be the farewell audio
+                                if hasattr(self, 'termination_in_progress') and self.termination_in_progress:
+                                    # Signal that farewell audio has been processed
+                                    self.farewell_completed = True
+                                    self.logger.info("Farewell audio processed, signaling completion")
                         
                         # If we got here without exceptions, the turn was successful
                         success = True
@@ -1529,6 +1535,182 @@ class GeminiSession:
             self.logger.error(f"Error in keep-alive task: {e}")
         finally:
             self.logger.info(f"Keep-alive task ended. Sent {keep_alive_counter} messages, {consecutive_failures} consecutive failures at end.")
+    
+    # Default termination message
+    DEFAULT_TERMINATION_MESSAGE = "Many apologies. Terminating the call now."
+    
+    async def terminate_call_gracefully(self, farewell_message: str = None, termination_reason: str = "user_requested"):
+        """
+        Gracefully terminate the call with a farewell message.
+        
+        Args:
+            farewell_message (str): The final message Gemini should speak before ending
+                                  If None, uses DEFAULT_TERMINATION_MESSAGE
+            termination_reason (str): Reason for termination (for logging/analytics)
+        """
+        # Use default message if none provided
+        if farewell_message is None:
+            farewell_message = self.DEFAULT_TERMINATION_MESSAGE
+            
+        self.logger.info(f"Initiating graceful call termination: {termination_reason}")
+        self.logger.info(f"Farewell message: '{farewell_message}'")
+        
+        try:
+            # Phase 1: Send farewell message to Gemini
+            await self._send_farewell_to_gemini(farewell_message)
+            
+            # Phase 2: Wait for Gemini to complete speaking
+            await self._wait_for_gemini_completion()
+            
+            # Phase 3: Send termination signal to Exotel
+            await self._send_exotel_termination_signal()
+            
+            # Phase 4: Close connections gracefully
+            await self._close_connections_gracefully()
+            
+            # Phase 5: Trigger cleanup and post-call processing
+            await self._trigger_final_cleanup(termination_reason)
+            
+            self.logger.info("Call terminated gracefully")
+            
+        except Exception as e:
+            self.logger.error(f"Error during graceful termination: {e}")
+            # Fallback to emergency termination
+            await self._emergency_termination()
+
+    async def _send_farewell_to_gemini(self, farewell_message: str):
+        """Make Gemini speak the farewell message as the assistant."""
+        try:
+            # Send as a system instruction to make Gemini speak this as the assistant
+            system_instruction = f"Please say this exact message to the customer now: '{farewell_message}'"
+            
+            if self.gemini_session:
+                await self.gemini_session.send_client_content(
+                    turns={"parts": [{"text": system_instruction}]}
+                )
+                self.logger.info(f"Farewell instruction sent to Gemini: {farewell_message}")
+            else:
+                self.logger.warning("No active Gemini session to send farewell message")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to send farewell to Gemini: {e}")
+            raise
+
+    async def _wait_for_gemini_completion(self):
+        """Wait for Gemini to finish speaking the farewell message."""
+        try:
+            # Set a flag to indicate we're in termination mode
+            self.termination_in_progress = True
+            
+            # Wait for the farewell audio to be fully processed
+            completion_timeout = 10.0  # Max 10 seconds for farewell
+            
+            start_time = asyncio.get_event_loop().time()
+            
+            # Monitor for completion signals from the receive_from_gemini task
+            while (asyncio.get_event_loop().time() - start_time) < completion_timeout:
+                if hasattr(self, 'farewell_completed') and self.farewell_completed:
+                    break
+                await asyncio.sleep(0.1)
+            
+            # Add a small buffer to ensure audio reaches Exotel
+            await asyncio.sleep(1.0)
+            
+            self.logger.info("Gemini farewell completion confirmed")
+            
+        except Exception as e:
+            self.logger.error(f"Error waiting for Gemini completion: {e}")
+            # Continue with termination even if we can't confirm completion
+
+    async def _send_exotel_termination_signal(self):
+        """Send termination signal to Exotel to end the call."""
+        try:
+            # Send a 'stop' message to Exotel to gracefully end the stream
+            stop_message = {
+                "event": "stop",
+                "stream_sid": self.stream_sid
+            }
+            
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.send(json.dumps(stop_message))
+                self.logger.info("Stop message sent to Exotel")
+            else:
+                self.logger.warning("WebSocket not available to send stop message")
+            
+            # Wait a moment for Exotel to process the stop signal
+            await asyncio.sleep(0.5)
+            
+        except Exception as e:
+            self.logger.error(f"Error sending termination signal to Exotel: {e}")
+
+    async def _close_connections_gracefully(self):
+        """Close all connections in the correct order."""
+        try:
+            # 1. Stop all background tasks (if we track them)
+            if hasattr(self, 'background_tasks'):
+                for task in self.background_tasks:
+                    if not task.done():
+                        task.cancel()
+            
+            # 2. Close Gemini session
+            if hasattr(self, 'gemini_session') and self.gemini_session:
+                try:
+                    await self.gemini_session.close()
+                    self.logger.info("Gemini session closed")
+                except Exception as e:
+                    self.logger.warning(f"Error closing Gemini session: {e}")
+            
+            # 3. Close WebSocket connection to Exotel
+            if self.websocket and not self.websocket.closed:
+                try:
+                    await self.websocket.close(code=1000, reason="Call terminated gracefully")
+                    self.logger.info("WebSocket connection closed")
+                except Exception as e:
+                    self.logger.warning(f"Error closing WebSocket: {e}")
+            
+        except Exception as e:
+            self.logger.error(f"Error during connection closure: {e}")
+
+    async def _trigger_final_cleanup(self, termination_reason: str):
+        """Trigger final cleanup and post-call processing."""
+        try:
+            # Add termination reason to session metadata (if we have it)
+            if hasattr(self, 'session_metadata'):
+                self.session_metadata['termination_reason'] = termination_reason
+                self.session_metadata['terminated_gracefully'] = True
+            
+            # Add termination info to transcript if available
+            if self.transcript_manager:
+                self.transcript_manager.add_to_transcript("system", f"Call terminated gracefully: {termination_reason}")
+            
+            # Trigger the existing cleanup process
+            self.cleanup()
+            
+            self.logger.info(f"Final cleanup triggered with reason: {termination_reason}")
+            
+        except Exception as e:
+            self.logger.error(f"Error during final cleanup: {e}")
+
+    async def _emergency_termination(self):
+        """Emergency termination when graceful termination fails."""
+        self.logger.warning("Performing emergency termination")
+        
+        try:
+            # Immediately close all connections
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.close(code=1001, reason="Emergency termination")
+            
+            if hasattr(self, 'gemini_session') and self.gemini_session:
+                try:
+                    await self.gemini_session.close()
+                except Exception as e:
+                    self.logger.warning(f"Error closing Gemini session during emergency: {e}")
+            
+            # Still trigger cleanup to save what we can
+            self.cleanup()
+            
+        except Exception as e:
+            self.logger.error(f"Error during emergency termination: {e}")
     
     def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
