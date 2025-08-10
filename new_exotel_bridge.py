@@ -538,18 +538,41 @@ class GeminiSession:
         self.gemini_output_sample_rate = None
         self.gemini_output_channels = None
         
-        # Conversation token tracking
-        self.conversation_tokens = []  # Store all usage_metadata from conversation
-        
-        # Inactivity timeout configuration
+        # Inactivity monitoring attributes
+        self.timeout_monitoring_active = False
+        self._last_user_activity_time = None  # Private variable
+        self.inactivity_timer_task = None
         self.INACTIVITY_TIMEOUT = 90.0  # 90 seconds
-        self.TIMEOUT_MESSAGE = ("Sorry. We have not heard anything from you for the last 90 seconds, "
-                               "ending the call right now. Please call us back if you would like to use our services")
+        self.TIMEOUT_MESSAGE = "Sorry. We have not heard anything from you for the last 90 seconds, ending the call right now. Please call us back if you would like to use our services."
         
         # Timer state management
-        self.last_user_activity_time = None
+        self._last_user_activity_time = None  # Private variable
         self.inactivity_timer_task = None
         self.timeout_monitoring_active = False
+    
+    @property
+    def last_user_activity_time(self):
+        """Property to intercept reads of last_user_activity_time."""
+        return self._last_user_activity_time
+    
+    @last_user_activity_time.setter
+    def last_user_activity_time(self, value):
+        """Property setter to intercept and log all modifications to last_user_activity_time."""
+        import traceback
+        import threading
+        
+        # Log the modification with stack trace
+        old_value = self._last_user_activity_time
+        self.logger.info(f"🚨 INSTRUMENTATION: last_user_activity_time changed from {old_value} to {value}")
+        self.logger.info(f"🚨 INSTRUMENTATION: Thread ID: {threading.get_ident()}")
+        
+        # Log stack trace to see who's calling this
+        stack = traceback.format_stack()
+        caller_info = stack[-2].strip() if len(stack) >= 2 else "Unknown caller"
+        self.logger.info(f"🚨 INSTRUMENTATION: Called from: {caller_info}")
+        
+        # Set the value
+        self._last_user_activity_time = value
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
