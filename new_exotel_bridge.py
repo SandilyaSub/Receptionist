@@ -556,6 +556,7 @@ class GeminiSession:
         # Shutdown coordination system (prevents TaskGroup race conditions)
         self.shutdown_requested = False  # Flag to coordinate graceful shutdown across all tasks
         self.shutdown_reason = None      # Reason for shutdown (for logging/analytics)
+        self.farewell_start_time = None  # Track when farewell delivery started
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
@@ -1100,8 +1101,17 @@ class GeminiSession:
             async for message in self.websocket:
                 # Check for coordinated shutdown request
                 if self.shutdown_requested:
-                    self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - stopping Exotel message processing")
-                    break
+                    # If farewell is being delivered, wait for it to complete before shutting down
+                    if self.farewell_start_time:
+                        farewell_elapsed = time.time() - self.farewell_start_time
+                        if farewell_elapsed < 4.0:  # Give 4 seconds for farewell delivery
+                            self.logger.debug(f"⏳ Farewell in progress ({farewell_elapsed:.1f}s) - continuing Exotel processing")
+                        else:
+                            self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - farewell delivered, stopping Exotel message processing")
+                            break
+                    else:
+                        self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - stopping Exotel message processing")
+                        break
                     
                 try:
                     data = json.loads(message)
@@ -1887,6 +1897,9 @@ class GeminiSession:
         try:
             # Send farewell instruction to Gemini while session is still active
             if self.gemini_session:
+                # Mark when farewell delivery starts (for Exotel task timing)
+                self.farewell_start_time = time.time()
+                
                 await self.gemini_session.send_client_content(
                     turns={"parts": [{"text": f"Please say this exact message to the customer now: '{farewell_message}'"}]}
                 )
