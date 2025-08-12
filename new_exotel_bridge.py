@@ -543,7 +543,7 @@ class GeminiSession:
         
         # Call termination and monitoring system
         self.call_start_time = time.time()
-        self.max_call_duration = 600.0  # 10 minutes max duration (production)
+        self.max_call_duration = 60.0  # 1 minutes max duration (production)
         self.inactivity_threshold = 90.0  # 90 seconds inactivity timeout (production)
         self.warning_threshold = 60.0  # 60 seconds before warning (production)
         self.warning_sent = False  # Track if warning has been sent
