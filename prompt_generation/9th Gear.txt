@@ -1,0 +1,64 @@
+About - 
+About 9th Gear
+At 9th Gear, Bangalore we understand that the car you drive is a reflection of you - your taste, your lifestyle, and your status.
+
+Motto - 
+NOTHING BUT EXTRAORDINARY
+Buy pre-owned luxury cars from 9th Gear, offering used cars of Audi, BMW, Mercedes and many more brands.
+
+Whether you're looking for the ultimate driving experience or simply want exclusivity, we have the cars that count. Buying the dream car of your choice may seem like an expensive proposition so why not treat yourself to a pre-owned one instead. From the finest in German engineering, Italian design, English tradition and American classics we have something for all automobile aficionados.
+
+Contact Details - 
+9th Gear
+No. 104, 80 Feet Road, Near Sony World
+Koramangala 4th Block
+Bangalore - 560034
+Phone - +91-9805980523
+email - info@9thgear.co.in
+Whatsapp - +919900102032
+
+FAQ - 
+1. Do you accept trade-ins?Yes. In fact, we will buy your car even if you don't buy one from us. We will carefully evaluate internal and external condition of your car as well check related documents. Then, we will give you the best quote. And you are under no obligation to buy one of Classic's cars if you sell us yours.
+
+
+Please add the links to the catalog as well. These will be used when the message generator needs to send out the message 
+
+But please ensure that the voice agent does not spell out the link during the conversation. 
+
+Process - Start of with introducing briefly about the showroom and ask for the customer's name and cars that he is interested in. Basis the car brand & body style recommend a set of cars from the catalog to him. Share details around the price , color , year of manufacture etc. Towards the end , tell him that someone will reach out to him and that he will receive a message that captures the link of the pics of the car , in case he wants to have a look. Please tell him that the message will also have details of the branch manager so that he could get in touch with him in case there is a need to do so.
+
+Catalog - 
+"Make/Model","Price","Year","KMs Driven","Owner(s)","Fuel","Transmission","Color","Insurance","Condition","Page Link"
+"BMW 520D LUXURY","₹17,75,000","2013","58,283","1","Diesel","Automatic","Metallic Grey","CI-MAR-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-520d-luxury/21963/"
+"BMW 220D SPORTLINE","₹32,75,000","2022","24,622","1","Diesel","Automatic","Black","CI-MAR-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-220d-sportline/21962/"
+"AUDI Q5 45 TFSI TECHNOLOGY","₹66,75,000","2025","1,375","1","Petrol","Automatic","Blue Sofisticat","CI-JUN-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/audi-q5-45-tfsi-technology/21961/"
+"BMW 330LI LUXURY LINE","₹44,75,000","2021","8,178","1","Petrol","Automatic","Silver","CI-SEP-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-330li-luxury-line/21960/"
+"MERCEDES BENZ GLE 300D 4MATIC","₹54,75,000","2020","83,839","1","Diesel","Automatic","Blue Sofisticat","CI-FEB-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-gle-300d-4matic/21959/"
+"MERCEDES BENZ GLS 450D 4MATIC","₹1,52,75,000","2024","11,456","1","Diesel","Automatic","Blue Sofisticat","CI-SEP-27","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-gls-450d-4matic/21958/"
+"MERCEDES BENZ GLC 220D 4MATIC","₹32,75,000","2016","41,721","1","Diesel","Automatic","Black","CI-JAN-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-glc-220d-4matic/21956/"
+"MERCEDES BENZ GLC 200 PROGRESSIVE","₹49,75,000","2021","29,711","1","Petrol","Automatic","Blue Sofisticat","CI-NOV-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-glc-200-progressive/21955/"
+"BMW 530D M SPORT","₹48,75,000","2019","44,850","1","Diesel","Automatic","Metallic Grey","CI-JAN-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-530d-m-sport/21954/"
+"MERCEDES BENZ GLE 300D 4MATIC","₹69,75,000","2022","27,450","2","Diesel","Automatic","White","CI-FEB-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-gle-300d-4matic/21953/"
+"JAGUAR XF PRESTIGE PETROL","₹32,75,000","2019","45,142","1","Petrol","Automatic","White","CI-NOV-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/jaguar-xf-prestige-petrol/21952/"
+"MERCEDES BENZ C 200 AVANTGARDE","₹39,75,000","2021","17,688","2","Petrol","Automatic","Red","CI-JUL-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-c-200-avantgarde/21951/"
+"MERCEDES BENZ C 220D","₹37,75,000","2019","21,801","1","Diesel","Automatic","Blue Sofisticat","NI","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-c-220d/21950/"
+"MERCEDES BENZ GLC 220D 4MATIC","₹37,75,000","2020","90,287","1","Diesel","Automatic","Silver","CI-AUG-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-glc-220d-4matic/21948/"
+"JAGUAR XF 2.2 DIESEL LUXURY","₹18,75,000","2014","31,463","1","Diesel","Automatic","White","CI-NOV-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/jaguar-xf-22-diesel-luxury/21946/"
+"JEEP MARIDIAN LIMITED O AT","₹33,75,000","2023","5,890","1","Diesel","Automatic","White","CI-DEC-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/jeep-maridian-limited-o-at/21942/"
+"MERCEDES BENZ GLA 220 CDI 4 MATIC","₹42,75,000","2022","32,762","1","Diesel","Automatic","White","CI-AUG-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-gla-220-cdi-4-matic/21941/"
+"LAND ROVER DISCOVERY SPORT HSE","₹36,75,000","2017","32,128","1","Diesel","Automatic","White","NI","Excellent","https://www.9thgear.co.in/luxury-used-cars/land-rover-discovery-sport-hse/21934/"
+"CITROEN C5 AIRCROSS 2.0L D SHINE","₹28,75,000","2022","42,679","1","Diesel","Automatic","Blue Sofisticat","CI-JAN-26","Excellent","https://www.9thgear.co.in/luxury-used-cars/citroen-c5-aircross-20l-d-shine/21931/"
+"BMW 530I SPORT","₹47,00,000","2020","11,175","2","Petrol","Automatic","Burnt Orange Me","CI-OCT-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-530i-sport/21929/"
+"VOLVO S90 MOMENTUM D4","₹45,75,000","2019","25,301","1","Diesel","Automatic","White","CI-JUL-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/volvo-s90-momentum-d4/21928/"
+"MERCEDES BENZ B200 D","₹16,25,000","2017","72,702","1","Diesel","Automatic","White","NI","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-b200-d/21926/"
+"BMW X1 SDRIVE 20I SPORTX","₹30,75,000","2020","32,264","1","Petrol","Automatic","White","CI-DEC-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-x1-sdrive-20i-sportx/21910/"
+"BMW X3 XDRIVE 20D","₹26,75,000","2016","55,786","1","Diesel","Automatic","Burnt Orange Me","CI-OCT-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-x3-xdrive-20d/21907/"
+"BMW X5 XDRIVE 30D","₹39,75,000","2016","48,484","1","Diesel","Automatic","White","CI-APRIL-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-x5-xdrive-30d/21904/"
+"RANGE ROVER SPORT SDV6 HSE","₹58,75,000","2015","65,127","2","Diesel","Automatic","Red","TP-DEC-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/range-rover-sport-sdv6-hse/21885/"
+"BMW X5 M COMPETITION","₹1,54,75,000","2021","21,959","1","Petrol","Automatic","White","CI-AUG-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-x5-m-competition/21878/"
+"JAGUAR F-PACE SVR","₹1,39,75,000","2022","13,666","1","Petrol","Automatic","Silver","CI-MAY-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/jaguar-fpace-svr/21877/"
+"MERCEDES BENZ EQS 580 4MATIC","₹1,04,75,000","2023","9,084","1","EV","Automatic","Black","CI-MAR-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-eqs-580-4matic/21865/"
+"BMW X4 XDRIVE 30D","₹66,75,000","2022","51,059","1","Diesel","Automatic","Blue Sofisticat","CI-JUN-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/bmw-x4-xdrive-30d/21861/"
+"MERCEDES BENZ GLA 200D","₹24,75,000","2019","35,575","2","Diesel","Automatic","Red","CI-APRIL-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/mercedes-benz-gla-200d/21856/"
+"AUDI A6 35 TDI MATRIX","₹25,25,000","2018","57,952","3","Diesel","Automatic","White","CI-MAY-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/audi-a6-35-tdi-matrix/21854/"
+"RANGE ROVER EVOQUE TD4 HSE","₹31,75,000","2017","96,016","1","Diesel","Automatic","White","CI-MAY-25","Excellent","https://www.9thgear.co.in/luxury-used-cars/range-rover-evoque-td4-hse/21824/"

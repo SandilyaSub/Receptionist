@@ -1,0 +1,11 @@
+{
+  "tenant_id": "9thGear",
+  "business_name": "",
+  "generation_timestamp": "2025-08-12T23:37:26.507281",
+  "quality_score": 0.6,
+  "validation_notes": [
+    "Generated using data-first approach with Claude"
+  ],
+  "business_type": "other",
+  "location": ""
+}
