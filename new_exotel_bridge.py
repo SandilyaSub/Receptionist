@@ -538,41 +538,22 @@ class GeminiSession:
         self.gemini_output_sample_rate = None
         self.gemini_output_channels = None
         
-        # Inactivity monitoring attributes
-        self.timeout_monitoring_active = False
-        self._last_user_activity_time = None  # Private variable
-        self.inactivity_timer_task = None
-        self.INACTIVITY_TIMEOUT = 90.0  # 90 seconds
-        self.TIMEOUT_MESSAGE = "Sorry. We have not heard anything from you for the last 90 seconds, ending the call right now. Please call us back if you would like to use our services."
+        # Conversation token tracking
+        self.conversation_tokens = []  # Store all usage_metadata from conversation
         
-        # Timer state management
-        self._last_user_activity_time = None  # Private variable
-        self.inactivity_timer_task = None
-        self.timeout_monitoring_active = False
-    
-    @property
-    def last_user_activity_time(self):
-        """Property to intercept reads of last_user_activity_time."""
-        return self._last_user_activity_time
-    
-    @last_user_activity_time.setter
-    def last_user_activity_time(self, value):
-        """Property setter to intercept and log all modifications to last_user_activity_time."""
-        import traceback
-        import threading
+        # Call termination and monitoring system
+        self.call_start_time = time.time()
+        self.max_call_duration = 600.0  # 10 minutes max duration (production)
+        self.inactivity_threshold = 90.0  # 90 seconds inactivity timeout (production)
+        self.warning_threshold = 60.0  # 60 seconds before warning (production)
+        self.warning_sent = False  # Track if warning has been sent
+        self.termination_in_progress = False  # Track if termination is in progress
+        self.farewell_completed = False  # Track if farewell audio is completed
         
-        # Log the modification with stack trace
-        old_value = self._last_user_activity_time
-        self.logger.info(f"🚨 INSTRUMENTATION: last_user_activity_time changed from {old_value} to {value}")
-        self.logger.info(f"🚨 INSTRUMENTATION: Thread ID: {threading.get_ident()}")
-        
-        # Log stack trace to see who's calling this
-        stack = traceback.format_stack()
-        caller_info = stack[-2].strip() if len(stack) >= 2 else "Unknown caller"
-        self.logger.info(f"🚨 INSTRUMENTATION: Called from: {caller_info}")
-        
-        # Set the value
-        self._last_user_activity_time = value
+        # Termination messages (production-ready)
+        self.max_duration_message = "We have exceeded the call duration limit, please call us back again. We will be disconnecting the call right now"
+        self.inactivity_message = "I haven't heard anything for a while. Thank you for calling, goodbye!"
+        self.warning_message = "I am having a hard time hearing you, can you please speak a bit louder, else the call will get disconnected. Thank you"
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
@@ -775,7 +756,7 @@ class GeminiSession:
             # Add to transcript
             if self.transcript_manager:
                 self.transcript_manager.add_to_transcript("assistant", greeting_message)
-        
+            
             self.logger.info(f"✅ Dynamic initial greeting sent successfully for tenant '{self.tenant}'")
             
         except Exception as e:
@@ -788,13 +769,9 @@ class GeminiSession:
                 )
                 if self.transcript_manager:
                     self.transcript_manager.add_to_transcript("assistant", fallback_message)
-                
                 self.logger.info("✅ Fallback greeting sent successfully")
             except Exception as fallback_error:
                 self.logger.error(f"Failed to send fallback greeting: {fallback_error}")
-        
-        # ALWAYS start inactivity monitoring after greeting attempt (regardless of success/failure)
-        self.start_inactivity_monitoring()
     
     def print_token_summary(self):
         """Print a comprehensive token usage summary for debugging purposes."""
@@ -980,6 +957,9 @@ class GeminiSession:
                             
                             # Task 3: Send keep-alive messages to prevent Exotel from timing out
                             tg.create_task(self.send_keep_alive_messages())
+                            
+                            # Task 4: Monitor for inactivity and call duration limits
+                            tg.create_task(self.monitor_inactivity_and_duration())
                 finally:
                     # Always call cleanup to ensure transcript is saved
                     try:
@@ -1127,12 +1107,27 @@ class GeminiSession:
                         elif data["event"] == "media":
                             # Process incoming audio data
                             if "media" in data and "payload" in data["media"]:
-                                # Reset inactivity timer - user is speaking
-                                self.reset_inactivity_timer()
-                                
                                 # Decode base64 audio data
                                 audio_data = base64.b64decode(data["media"]["payload"])
                                 sample_rate = data["media"].get("rate", 8000)  # Default to 8kHz if not specified
+                                
+                                # Voice Activity Detection (VAD) using RMS
+                                try:
+                                    # Calculate RMS (Root Mean Square) to detect voice activity
+                                    rms = audioop.rms(audio_data, 2)  # 2 bytes per sample for 16-bit audio
+                                    if rms > 500:  # Threshold for voice activity (adjust as needed)
+                                        self.last_activity_time = time.time()
+                                        # Reset warning flag when user speaks (activity detected)
+                                        if self.warning_sent:
+                                            self.warning_sent = False
+                                            self.logger.info("🔄 User activity detected - warning flag reset")
+                                except:
+                                    # If RMS calculation fails, assume activity anyway
+                                    self.last_activity_time = time.time()
+                                    # Reset warning flag when user speaks (fallback case)
+                                    if self.warning_sent:
+                                        self.warning_sent = False
+                                        self.logger.info("🔄 User activity detected (fallback) - warning flag reset")
                                 
                                 # Resample audio to 24kHz for Gemini if needed
                                 if sample_rate != GEMINI_SAMPLE_RATE:
@@ -1576,104 +1571,6 @@ class GeminiSession:
         finally:
             self.logger.info(f"Keep-alive task ended. Sent {keep_alive_counter} messages, {consecutive_failures} consecutive failures at end.")
     
-    def start_inactivity_monitoring(self):
-        """Start monitoring for user inactivity."""
-        # DIAGNOSTIC: Log timer initialization
-        init_time = time.time()
-        self.last_user_activity_time = init_time
-        self.timeout_monitoring_active = True
-        
-        self.logger.info(f"🔄 DIAGNOSTIC: Timer initialized at {init_time} (last_user_activity_time = {self.last_user_activity_time})")
-        self.logger.info(f"🔄 DIAGNOSTIC: timeout_monitoring_active = {self.timeout_monitoring_active}")
-        
-        # Start the monitoring task
-        self.inactivity_timer_task = asyncio.create_task(self.monitor_inactivity())
-        
-        # Enhanced logging with task verification
-        task_id = id(self.inactivity_timer_task)
-        self.logger.info(f"🔄 Inactivity monitoring started - 90s timeout active (task ID: {task_id})")
-        
-        # Verify task is actually running
-        if self.inactivity_timer_task.done():
-            self.logger.error(f"⚠️ Inactivity monitoring task failed to start properly!")
-        else:
-            self.logger.debug(f"✅ Inactivity monitoring task confirmed running")
-            
-        # DIAGNOSTIC: Verify values after task creation
-        self.logger.info(f"🔄 DIAGNOSTIC: After task creation - last_user_activity_time = {self.last_user_activity_time}, monitoring_active = {self.timeout_monitoring_active}")
-
-    def reset_inactivity_timer(self):
-        """Reset the inactivity timer when user activity is detected."""
-        if self.timeout_monitoring_active:
-            old_time = self.last_user_activity_time
-            self.last_user_activity_time = time.time()
-            
-            # Only log if significant time has passed (avoid spam during continuous speech)
-            if old_time is None or (time.time() - old_time) > 2.0:
-                gap = "initial" if old_time is None else f"{time.time() - old_time:.1f}s"
-                self.logger.debug(f"🔄 User activity detected - inactivity timer reset (gap: {gap})")
-
-    def stop_inactivity_monitoring(self):
-        """Stop inactivity monitoring."""
-        self.timeout_monitoring_active = False
-        if self.inactivity_timer_task and not self.inactivity_timer_task.done():
-            self.inactivity_timer_task.cancel()
-            self.logger.info("Inactivity monitoring stopped")
-
-    async def monitor_inactivity(self):
-        """Background task to monitor user inactivity and trigger timeout."""
-        last_log_time = 0
-        check_count = 0
-        
-        try:
-            self.logger.info("🔄 Inactivity monitoring task started and running")
-            
-            # DIAGNOSTIC: Log initial state
-            self.logger.info(f"🔄 DIAGNOSTIC: Initial state - last_user_activity_time = {self.last_user_activity_time}, timeout_monitoring_active = {self.timeout_monitoring_active}")
-            
-            while self.timeout_monitoring_active:
-                check_count += 1
-                current_time = time.time()
-                
-                # DIAGNOSTIC: Log every single check for first 20 checks, then every 6th
-                should_log_detailed = check_count <= 20 or check_count % 6 == 0
-                
-                if should_log_detailed:
-                    self.logger.info(f"🔄 DIAGNOSTIC: Check #{check_count} - current_time = {current_time}, last_user_activity_time = {self.last_user_activity_time}")
-                
-                if self.last_user_activity_time:
-                    inactive_duration = current_time - self.last_user_activity_time
-                    
-                    if should_log_detailed:
-                        self.logger.info(f"🔄 DIAGNOSTIC: Check #{check_count} - inactive_duration = {inactive_duration:.1f}s, TIMEOUT = {self.INACTIVITY_TIMEOUT}s")
-                    
-                    # Log every 30 seconds (6 checks) to avoid spam
-                    if check_count % 6 == 0:
-                        self.logger.info(f"Inactivity check #{check_count}: {inactive_duration:.1f}s since last activity")
-                    
-                    if inactive_duration >= self.INACTIVITY_TIMEOUT:
-                        self.logger.info(f"🚨 TIMEOUT TRIGGERED: User inactive for {inactive_duration:.1f} seconds")
-                        
-                        # Trigger graceful termination with timeout message
-                        await self.terminate_call_gracefully(
-                            farewell_message=self.TIMEOUT_MESSAGE,
-                            termination_reason="inactivity_timeout"
-                        )
-                        break
-                else:
-                    # This should never happen, but log if it does
-                    self.logger.warning(f"⚠️ DIAGNOSTIC: Check #{check_count} - last_user_activity_time is None!")
-                
-                # Check every 5 seconds
-                await asyncio.sleep(5.0)
-                
-        except asyncio.CancelledError:
-            self.logger.info("Inactivity monitoring task cancelled")
-        except Exception as e:
-            self.logger.error(f"Error in inactivity monitoring: {e}")
-        finally:
-            self.logger.info(f"🔄 Inactivity monitoring task ended after {check_count} checks")
-    
     # Default termination message
     DEFAULT_TERMINATION_MESSAGE = "Many apologies. Terminating the call now."
     
@@ -1850,13 +1747,204 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"Error during emergency termination: {e}")
     
+    async def monitor_inactivity_and_duration(self):
+        """Background task to monitor inactivity and call duration."""
+        self.logger.info("🔍 Starting inactivity and duration monitoring task")
+        
+        while True:
+            try:
+                # Check every 5 seconds
+                await asyncio.sleep(5)
+                
+                # Check for inactivity and duration limits
+                if await self.check_inactivity_and_duration():
+                    self.logger.info("🔚 Termination triggered by monitoring task")
+                    return  # Exit monitoring task
+                    
+            except asyncio.CancelledError:
+                self.logger.info("Monitoring task cancelled")
+                return
+            except Exception as e:
+                self.logger.error(f"Error in monitoring task: {e}")
+                await asyncio.sleep(1)  # Brief pause before retrying
+
+    async def check_inactivity_and_duration(self):
+        """Check for inactivity and maximum call duration, with low volume warning system."""
+        current_time = time.time()
+        
+        # Check for inactivity with warning system
+        time_since_activity = current_time - self.last_activity_time
+        
+        # Step 1: Check if we should send a warning (at warning_threshold)
+        if (time_since_activity > self.warning_threshold and 
+            not self.warning_sent and 
+            time_since_activity < self.inactivity_threshold):
+            
+            self.logger.info(f"⚠️ Low volume warning triggered: {time_since_activity:.1f}s > {self.warning_threshold}s")
+            await self._send_low_volume_warning()
+            return False  # Continue monitoring, don't terminate yet
+        
+        # Step 2: Check for full inactivity timeout (at inactivity_threshold)
+        if time_since_activity > self.inactivity_threshold:
+            self.logger.info(f"⏰ Inactivity detected: {time_since_activity:.1f}s > {self.inactivity_threshold}s")
+            await self.terminate_call_gracefully(
+                self.inactivity_message,
+                "inactivity_timeout"
+            )
+            return True
+        
+        # Check for maximum call duration
+        call_duration = current_time - self.call_start_time
+        if call_duration > self.max_call_duration:
+            self.logger.info(f"⏰ Max duration reached: {call_duration:.1f}s > {self.max_call_duration}s")
+            await self.terminate_call_gracefully(
+                self.max_duration_message,
+                "max_duration_reached"
+            )
+            return True
+        
+        return False
+
+    async def _send_low_volume_warning(self):
+        """Send a low volume warning to the user via Gemini."""
+        try:
+            self.logger.info(f"📢 Sending low volume warning to user")
+            self.logger.info(f"💬 Warning message: '{self.warning_message}'")
+            
+            # Send warning instruction to Gemini to speak as the assistant
+            warning_instruction = f"Please say this exact message to the customer now: '{self.warning_message}'"
+            
+            if self.gemini_session:
+                await self.gemini_session.send_client_content(
+                    turns={"parts": [{"text": warning_instruction}]}
+                )
+                self.logger.info(f"📤 Warning instruction sent to Gemini: {self.warning_message}")
+                
+                # Mark warning as sent
+                self.warning_sent = True
+                self.logger.info("✅ Low volume warning sent successfully")
+            else:
+                self.logger.warning("⚠️ No active Gemini session to send warning message")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to send low volume warning: {e}")
+            # Don't raise - continue with normal flow
+
+    async def terminate_call_gracefully(self, farewell_message: str, termination_reason: str = "user_requested"):
+        """Gracefully terminate the call with a farewell message.
+        
+        Args:
+            farewell_message (str): The final message Gemini should speak before ending
+            termination_reason (str): Reason for termination (for logging/analytics)
+        """
+        self.logger.info(f"🔚 Initiating graceful call termination: {termination_reason}")
+        self.logger.info(f"💬 Farewell message: '{farewell_message}'")
+        
+        try:
+            # Phase 1: Send farewell message to Gemini
+            await self._send_farewell_to_gemini(farewell_message)
+            
+            # Phase 2: Wait for Gemini to complete speaking
+            await self._wait_for_gemini_completion()
+            
+            # Phase 3: Close session gracefully
+            await self._close_session_gracefully()
+            
+            self.logger.info("✅ Call terminated gracefully")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error during graceful termination: {e}")
+            # Fallback to immediate termination
+            await self._emergency_termination()
+
+    async def _send_farewell_to_gemini(self, farewell_message: str):
+        """Make Gemini speak the farewell message as the assistant."""
+        try:
+            # Send as a system instruction to make Gemini speak this as the assistant
+            system_instruction = f"Please say this exact message to the customer now: '{farewell_message}'"
+            
+            if self.gemini_session:
+                await self.gemini_session.send_client_content(
+                    turns={"parts": [{"text": system_instruction}]}
+                )
+                self.logger.info(f"📤 Farewell instruction sent to Gemini: {farewell_message}")
+            else:
+                self.logger.warning("⚠️ No active Gemini session to send farewell message")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to send farewell to Gemini: {e}")
+            raise
+
+    async def _wait_for_gemini_completion(self):
+        """Wait for Gemini to finish speaking the farewell message."""
+        try:
+            # Set a flag to indicate we're in termination mode
+            self.termination_in_progress = True
+            
+            # Wait for the farewell audio to be fully processed
+            completion_timeout = 10.0  # Max 10 seconds for farewell
+            
+            start_time = time.time()
+            
+            # Monitor for completion signals
+            while (time.time() - start_time) < completion_timeout:
+                if hasattr(self, 'farewell_completed') and self.farewell_completed:
+                    break
+                await asyncio.sleep(0.1)
+            
+            # Add a small buffer to ensure audio reaches output
+            await asyncio.sleep(1.0)
+            
+            self.logger.info("✅ Gemini farewell completion confirmed")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error waiting for Gemini completion: {e}")
+            # Continue with termination even if we can't confirm completion
+
+    async def _close_session_gracefully(self):
+        """Close the session gracefully."""
+        try:
+            self.logger.info("🔚 Session end requested - graceful closure initiated")
+            
+            # Close Gemini session if active
+            if self.gemini_session:
+                try:
+                    await self.gemini_session.close()
+                    self.logger.info("✅ Gemini session closed gracefully")
+                except Exception as e:
+                    self.logger.warning(f"Warning during Gemini session closure: {e}")
+            
+            # Close WebSocket connection
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.close()
+                self.logger.info("✅ WebSocket connection closed gracefully")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error during graceful session closure: {e}")
+            raise
+
+    async def _emergency_termination(self):
+        """Emergency termination when graceful termination fails."""
+        try:
+            self.logger.warning("⚠️ Performing emergency termination")
+            
+            # Force close Gemini session
+            if self.gemini_session:
+                try:
+                    await self.gemini_session.close()
+                except Exception as e:
+                    self.logger.warning(f"Error closing Gemini session during emergency: {e}")
+            
+            # Force close WebSocket
+            if self.websocket and not self.websocket.closed:
+                await self.websocket.close()
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error during emergency termination: {e}")
+    
     def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
         self.logger.info(f"Triggering async cleanup for session {self.session_id}")
-        
-        # Stop inactivity monitoring when call ends
-        self.stop_inactivity_monitoring()
-        
         asyncio.create_task(self.run_post_call_processing())
 
     async def run_post_call_processing(self):
