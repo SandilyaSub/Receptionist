@@ -547,8 +547,6 @@ class GeminiSession:
         self.inactivity_threshold = 90.0  # 90 seconds inactivity timeout (production)
         self.warning_threshold = 60.0  # 60 seconds before warning (production)
         self.warning_sent = False  # Track if warning has been sent
-        self.termination_in_progress = False  # Track if termination is in progress
-        self.farewell_completed = False  # Track if farewell audio is completed
         
         # Termination messages (production-ready)
         self.max_duration_message = "We have exceeded the call duration limit, please call us back again. We will be disconnecting the call right now"
@@ -1349,12 +1347,6 @@ class GeminiSession:
                                 
                                 if send_audio:
                                     await self._send_audio_to_exotel()
-                                    
-                                # Check if we're in termination mode and this might be the farewell audio
-                                if hasattr(self, 'termination_in_progress') and self.termination_in_progress:
-                                    # Signal that farewell audio has been processed
-                                    self.farewell_completed = True
-                                    self.logger.info("Farewell audio processed, signaling completion")
                         
                         # If we got here without exceptions, the turn was successful
                         success = True
@@ -1831,116 +1823,53 @@ class GeminiSession:
             # Don't raise - continue with normal flow
 
     async def terminate_call_gracefully(self, farewell_message: str, termination_reason: str = "user_requested"):
-        """Gracefully terminate the call with a farewell message.
+        """Simplified, reliable call termination with adequate farewell time.
         
         Args:
             farewell_message (str): The final message Gemini should speak before ending
             termination_reason (str): Reason for termination (for logging/analytics)
         """
-        self.logger.info(f"🔚 Initiating graceful call termination: {termination_reason}")
-        self.logger.info(f"💬 Farewell message: '{farewell_message}'")
+        self.logger.info(f"🔚 Terminating call: {termination_reason}")
+        self.logger.info(f"💬 Farewell: '{farewell_message}'")
         
         try:
-            # Phase 1: Send farewell message to Gemini
-            await self._send_farewell_to_gemini(farewell_message)
-            
-            # Phase 2: Wait for Gemini to complete speaking
-            await self._wait_for_gemini_completion()
-            
-            # Phase 3: Close session gracefully
-            await self._close_session_gracefully()
-            
-            self.logger.info("✅ Call terminated gracefully")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error during graceful termination: {e}")
-            # Fallback to immediate termination
-            await self._emergency_termination()
-
-    async def _send_farewell_to_gemini(self, farewell_message: str):
-        """Make Gemini speak the farewell message as the assistant."""
-        try:
-            # Send as a system instruction to make Gemini speak this as the assistant
-            system_instruction = f"Please say this exact message to the customer now: '{farewell_message}'"
-            
+            # Step 1: Send farewell instruction to Gemini
             if self.gemini_session:
                 await self.gemini_session.send_client_content(
-                    turns={"parts": [{"text": system_instruction}]}
+                    turns={"parts": [{"text": f"Please say this exact message to the customer now: '{farewell_message}'"}]}
                 )
-                self.logger.info(f"📤 Farewell instruction sent to Gemini: {farewell_message}")
-            else:
-                self.logger.warning("⚠️ No active Gemini session to send farewell message")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Failed to send farewell to Gemini: {e}")
-            raise
-
-    async def _wait_for_gemini_completion(self):
-        """Wait for Gemini to finish speaking the farewell message."""
-        try:
-            # Set a flag to indicate we're in termination mode
-            self.termination_in_progress = True
+                self.logger.info("📤 Farewell instruction sent to Gemini")
             
-            # Wait for the farewell audio to be fully processed
-            completion_timeout = 10.0  # Max 10 seconds for farewell
+            # Step 2: Wait for farewell delivery (2.5s covers most messages)
+            self.logger.info("⏱️ Waiting 2.5s for farewell message delivery")
+            await asyncio.sleep(2.5)
             
-            start_time = time.time()
-            
-            # Monitor for completion signals
-            while (time.time() - start_time) < completion_timeout:
-                if hasattr(self, 'farewell_completed') and self.farewell_completed:
-                    break
-                await asyncio.sleep(0.1)
-            
-            # Add a small buffer to ensure audio reaches output
-            await asyncio.sleep(1.0)
-            
-            self.logger.info("✅ Gemini farewell completion confirmed")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error waiting for Gemini completion: {e}")
-            # Continue with termination even if we can't confirm completion
-
-    async def _close_session_gracefully(self):
-        """Close the session gracefully."""
-        try:
-            self.logger.info("🔚 Session end requested - graceful closure initiated")
-            
-            # Close Gemini session if active
+            # Step 3: Close Gemini session
             if self.gemini_session:
                 try:
                     await self.gemini_session.close()
-                    self.logger.info("✅ Gemini session closed gracefully")
+                    self.logger.info("✅ Gemini session closed")
                 except Exception as e:
-                    self.logger.warning(f"Warning during Gemini session closure: {e}")
+                    self.logger.warning(f"⚠️ Error closing Gemini session: {e}")
             
-            # Close WebSocket connection
-            if self.websocket and not self.websocket.closed:
-                await self.websocket.close()
-                self.logger.info("✅ WebSocket connection closed gracefully")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error during graceful session closure: {e}")
-            raise
-
-    async def _emergency_termination(self):
-        """Emergency termination when graceful termination fails."""
-        try:
-            self.logger.warning("⚠️ Performing emergency termination")
-            
-            # Force close Gemini session
-            if self.gemini_session:
+            # Step 4: Close WebSocket connection
+            if self.websocket:
                 try:
-                    await self.gemini_session.close()
+                    await self.websocket.close()
+                    self.logger.info("✅ WebSocket closed")
                 except Exception as e:
-                    self.logger.warning(f"Error closing Gemini session during emergency: {e}")
+                    self.logger.warning(f"⚠️ Error closing WebSocket: {e}")
             
-            # Force close WebSocket
-            if self.websocket and not self.websocket.closed:
-                await self.websocket.close()
-                
+            self.logger.info("✅ Call terminated successfully")
+            
         except Exception as e:
-            self.logger.error(f"❌ Error during emergency termination: {e}")
+            self.logger.error(f"❌ Error during termination: {e}")
+        finally:
+            # Always trigger post-call processing
+            self.cleanup()
+            self.logger.info("🔄 Post-call processing initiated")
+
+
     
     def cleanup(self):
         """Triggers the non-blocking, asynchronous cleanup process."""
