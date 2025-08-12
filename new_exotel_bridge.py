@@ -1793,6 +1793,11 @@ class GeminiSession:
                 # Check every 5 seconds
                 await asyncio.sleep(5)
                 
+                # Check if WebSocket is closed (user disconnected)
+                if self.websocket.closed:
+                    self.logger.info("🔌 WebSocket closed, stopping monitoring task")
+                    return
+                
                 # Check for inactivity and duration limits
                 if await self.check_inactivity_and_duration():
                     self.logger.info("🔚 Termination triggered by monitoring task")
