@@ -143,8 +143,8 @@ class ActionService:
             customer_phone = call_details.get("from_number")
             call_type = call_details.get("call_type", "Unknown")
             
-            # Only send notifications for Booking and Informational call types
-            if customer_phone and call_type in ["Booking", "Informational"]:
+            # Only exclude notifications for specific call types (blacklist approach)
+            if customer_phone and call_type not in ["Missed", "Blank", "Others"]:
                 self.logger.info(f"Sending {call_type} notification to customer {customer_phone}")
                 customer_result = await self._send_customer_notification(
                     phone=customer_phone,
