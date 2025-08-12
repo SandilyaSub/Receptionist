@@ -543,14 +543,14 @@ class GeminiSession:
         
         # Call termination and monitoring system
         self.call_start_time = time.time()
-        self.max_call_duration = 60.0  # 1 minutes max duration (production)
+        self.max_call_duration = 600.0  # 10 minutes max duration (production)
         self.inactivity_threshold = 90.0  # 90 seconds inactivity timeout (production)
         self.warning_threshold = 60.0  # 60 seconds before warning (production)
         self.warning_sent = False  # Track if warning has been sent
         
         # Termination messages (production-ready)
         self.max_duration_message = "We have exceeded the call duration limit, please call us back again. We will be disconnecting the call right now"
-        self.inactivity_message = "I haven't heard anything for a while. Thank you for calling, goodbye!"
+        self.inactivity_message = "I haven't heard anything for a while. Disconnecting the call right now. Thank you for calling, goodbye!"
         self.warning_message = "I am having a hard time hearing you, can you please speak a bit louder, else the call will get disconnected. Thank you"
         
         # Shutdown coordination system (prevents TaskGroup race conditions)
