@@ -552,6 +552,10 @@ class GeminiSession:
         self.max_duration_message = "We have exceeded the call duration limit, please call us back again. We will be disconnecting the call right now"
         self.inactivity_message = "I haven't heard anything for a while. Thank you for calling, goodbye!"
         self.warning_message = "I am having a hard time hearing you, can you please speak a bit louder, else the call will get disconnected. Thank you"
+        
+        # Shutdown coordination system (prevents TaskGroup race conditions)
+        self.shutdown_requested = False  # Flag to coordinate graceful shutdown across all tasks
+        self.shutdown_reason = None      # Reason for shutdown (for logging/analytics)
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
@@ -1094,6 +1098,11 @@ class GeminiSession:
         
         try:
             async for message in self.websocket:
+                # Check for coordinated shutdown request
+                if self.shutdown_requested:
+                    self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - stopping Exotel message processing")
+                    break
+                    
                 try:
                     data = json.loads(message)
                     self.logger.debug(f"Received message: {data['event'] if 'event' in data else 'unknown event'}")
@@ -1170,10 +1179,26 @@ class GeminiSession:
             raise
         finally:
             # This block is critical. It runs when the `async for` loop exits,
-            # which happens when the Exotel connection closes.
-            self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
+            # which happens when the Exotel connection closes OR coordinated shutdown is requested.
+            if self.shutdown_requested:
+                self.logger.info(f"Exotel task finished due to coordinated shutdown ({self.shutdown_reason})")
+                # Close WebSocket to signal shutdown to other tasks
+                if self.websocket and not self.websocket.closed:
+                    try:
+                        await self.websocket.close()
+                        self.logger.info("✅ WebSocket closed during coordinated shutdown")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Error closing WebSocket during coordinated shutdown: {e}")
+            else:
+                self.logger.info("Exotel listening loop finished. Actively closing Gemini session to prevent timeout.")
+                
+            # Always close Gemini session when Exotel task finishes (mirrors original behavior)
             if self.gemini_session:
-                await self.gemini_session.close()
+                try:
+                    await self.gemini_session.close()
+                    self.logger.info("✅ Gemini session closed by Exotel task")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Error closing Gemini session: {e}")
     
     async def receive_from_gemini(self):
         """Receive responses from Gemini and send to Exotel."""
@@ -1190,6 +1215,11 @@ class GeminiSession:
         try:
             # Process responses from Gemini with retry logic
             while True:
+                # Check for coordinated shutdown request
+                if self.shutdown_requested:
+                    self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - stopping Gemini response processing")
+                    break
+                
                 # Check if WebSocket is still open
                 websocket_open = True
                 try:
@@ -1487,6 +1517,11 @@ class GeminiSession:
         
         try:
             while True:
+                # Check for coordinated shutdown request
+                if self.shutdown_requested:
+                    self.logger.info(f"🚩 Shutdown requested ({self.shutdown_reason}) - stopping keep-alive messages")
+                    break
+                
                 # Check if WebSocket is still open
                 websocket_open = True
                 try:
@@ -1751,7 +1786,12 @@ class GeminiSession:
                 # Check for inactivity and duration limits
                 if await self.check_inactivity_and_duration():
                     self.logger.info("🔚 Termination triggered by monitoring task")
-                    return  # Exit monitoring task
+                    
+                    # Wait for other tasks to detect shutdown flag and finish gracefully
+                    # This prevents TaskGroup race conditions
+                    await self._wait_for_coordinated_shutdown()
+                    
+                    return  # Exit monitoring task after coordination is complete
                     
             except asyncio.CancelledError:
                 self.logger.info("Monitoring task cancelled")
@@ -1779,20 +1819,31 @@ class GeminiSession:
         # Step 2: Check for full inactivity timeout (at inactivity_threshold)
         if time_since_activity > self.inactivity_threshold:
             self.logger.info(f"⏰ Inactivity detected: {time_since_activity:.1f}s > {self.inactivity_threshold}s")
-            await self.terminate_call_gracefully(
-                self.inactivity_message,
-                "inactivity_timeout"
-            )
+            
+            # Set coordination flag for consistent shutdown behavior
+            self.shutdown_requested = True
+            self.shutdown_reason = "inactivity_timeout"
+            self.logger.info("🚩 Shutdown flag set - coordinating graceful termination across all tasks")
+            
+            # Send farewell message to Gemini while session is still active
+            await self._send_coordinated_farewell(self.inactivity_message)
+            
             return True
         
         # Check for maximum call duration
         call_duration = current_time - self.call_start_time
         if call_duration > self.max_call_duration:
             self.logger.info(f"⏰ Max duration reached: {call_duration:.1f}s > {self.max_call_duration}s")
-            await self.terminate_call_gracefully(
-                self.max_duration_message,
-                "max_duration_reached"
-            )
+            
+            # Set coordination flag instead of calling terminate_call_gracefully directly
+            # This prevents TaskGroup race conditions
+            self.shutdown_requested = True
+            self.shutdown_reason = "max_duration_reached"
+            self.logger.info("🚩 Shutdown flag set - coordinating graceful termination across all tasks")
+            
+            # Send farewell message to Gemini while session is still active
+            await self._send_coordinated_farewell(self.max_duration_message)
+            
             return True
         
         return False
@@ -1821,6 +1872,57 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"❌ Failed to send low volume warning: {e}")
             # Don't raise - continue with normal flow
+
+    async def _send_coordinated_farewell(self, farewell_message: str):
+        """Send farewell message to Gemini during coordinated shutdown.
+        
+        This method sends the farewell message but doesn't close sessions - 
+        that's handled by individual tasks detecting the shutdown flag.
+        
+        Args:
+            farewell_message (str): The final message Gemini should speak
+        """
+        self.logger.info(f"💬 Sending coordinated farewell: '{farewell_message}'")
+        
+        try:
+            # Send farewell instruction to Gemini while session is still active
+            if self.gemini_session:
+                await self.gemini_session.send_client_content(
+                    turns={"parts": [{"text": f"Please say this exact message to the customer now: '{farewell_message}'"}]}
+                )
+                self.logger.info("📤 Coordinated farewell instruction sent to Gemini")
+                
+                # Wait for farewell delivery (2.5s covers most messages)
+                self.logger.info("⏱️ Waiting 2.5s for farewell message delivery")
+                await asyncio.sleep(2.5)
+                self.logger.info("✅ Farewell delivery time completed")
+            else:
+                self.logger.warning("⚠️ No active Gemini session to send farewell message")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error sending coordinated farewell: {e}")
+            # Don't raise - let tasks handle shutdown gracefully anyway
+
+    async def _wait_for_coordinated_shutdown(self):
+        """Wait for other tasks to detect shutdown flag and finish gracefully.
+        
+        This method gives other tasks time to see the shutdown_requested flag
+        and exit their loops cleanly, preventing TaskGroup race conditions.
+        """
+        self.logger.info("⏳ Waiting for other tasks to detect shutdown flag and finish gracefully")
+        
+        # Give tasks a reasonable amount of time to detect the flag and shut down
+        # Most tasks check the flag every loop iteration, so this should be quick
+        shutdown_timeout = 10.0  # 10 seconds should be more than enough
+        
+        try:
+            # Wait a bit for tasks to detect the flag and start their shutdown process
+            await asyncio.sleep(2.0)
+            self.logger.info("✅ Coordination wait completed - other tasks should be shutting down")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error during coordinated shutdown wait: {e}")
+            # Continue anyway - tasks will be cancelled by TaskGroup if needed
 
     async def terminate_call_gracefully(self, farewell_message: str, termination_reason: str = "user_requested"):
         """Simplified, reliable call termination with adequate farewell time.
