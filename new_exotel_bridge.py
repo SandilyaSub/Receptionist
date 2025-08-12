@@ -1794,7 +1794,15 @@ class GeminiSession:
                 await asyncio.sleep(5)
                 
                 # Check if WebSocket is closed (user disconnected)
-                if self.websocket.closed:
+                websocket_open = True
+                if hasattr(self.websocket, 'open'):
+                    websocket_open = self.websocket.open
+                elif hasattr(self.websocket, 'closed'):
+                    websocket_open = not self.websocket.closed
+                elif hasattr(self.websocket, 'state'):
+                    websocket_open = self.websocket.state.name == 'OPEN'
+                
+                if not websocket_open:
                     self.logger.info("🔌 WebSocket closed, stopping monitoring task")
                     return
                 
