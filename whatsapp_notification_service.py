@@ -34,6 +34,12 @@ class WhatsAppNotificationService:
         self.template_mapping = {
             "Booking": "customer_message.json",
             "Informational": "customer_message.json",
+            "Inquiry" : "customer_message.json",
+            "Booking/Test Drive" : "customer_message.json",
+            "Follow-up" : "customer_message.json",
+            "Trade-in" : "customer_message.json",
+            "Finance/Documentation" : "customer_message.json",
+            "Service Support" : "customer_message.json",
             # Default to customer_message for any other call types
             "Unknown": "customer_message.json"
         }
