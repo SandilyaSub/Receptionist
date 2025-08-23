@@ -21,8 +21,8 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 # Import our custom modules
-from gemini_session import GeminiSession
-from transcript_manager import TranscriptManager
+# from gemini_session import GeminiSession
+# from transcript_manager import TranscriptManager
 from handover_service import HandoverService
 
 
