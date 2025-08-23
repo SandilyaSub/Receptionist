@@ -15,6 +15,7 @@ import uuid
 import audioop
 import sys
 import warnings
+import httpx
 from datetime import datetime
 from typing import Optional, Dict, Any
 import requests
@@ -444,12 +445,12 @@ def create_gemini_config(tenant="bakery"):
         # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
         input_audio_transcription={},  # Empty dict enables input transcription
         output_audio_transcription={},  # Empty dict enables output transcription
-        # Add VAD configuration for better short utterance detection using proper enums
+        # Add VAD configuration for better short utterance detection
         realtime_input_config={
             "automatic_activity_detection": {
                 "disabled": False,  # Enable VAD
-                "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
-                "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
+                "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",  # More sensitive for telephony
+                "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",  # Faster end detection
                 "prefix_padding_ms": 20,  # Default value
                 "silence_duration_ms": 500  # Shorter silence to detect end of speech faster
             }

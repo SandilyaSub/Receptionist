@@ -4,7 +4,7 @@ uvicorn
 websockets>=11.0.3
 
 # Google Gemini
-google-genai
+google-genai>=1.21.0
 jsonschema
 
 # Google Calendar API
@@ -22,6 +22,7 @@ python-dotenv==1.0.1
 aiohttp
 requests==2.32.3
 flask==3.0.0
+httpx
 
 # Python version compatibility
 taskgroup
