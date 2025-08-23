@@ -452,8 +452,8 @@ def create_gemini_config(tenant="bakery"):
         realtime_input_config={
             "automatic_activity_detection": {
                 "disabled": False,  # Enable VAD
-                # "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
-                # "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
+                "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
+                "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
                 "prefix_padding_ms": 20,  # Default value
                 "silence_duration_ms": 500  # Shorter silence to detect end of speech faster
             }
@@ -2429,7 +2429,8 @@ class ExotelGeminiBridge:
         self.logger.info("Server startup: Using prompt-based greeting system (no cache loading needed)")
         
         # Start Flask HTTP server in a separate thread for handover endpoint
-        self._start_http_server()
+        # TEMPORARILY DISABLED: Testing hypothesis that HTTP server causes port conflicts on Railway
+        # self._start_http_server()
         
         # Create a WebSocket server
         async def handler(websocket, path=None):
