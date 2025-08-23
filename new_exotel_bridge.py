@@ -22,6 +22,7 @@ from typing import Optional, Dict, Any
 import requests
 from requests.auth import HTTPBasicAuth
 from flask import Flask, request, jsonify
+import httpx
 
 # Import our custom modules
 # from gemini_session import GeminiSession
@@ -451,8 +452,8 @@ def create_gemini_config(tenant="bakery"):
         realtime_input_config={
             "automatic_activity_detection": {
                 "disabled": False,  # Enable VAD
-                "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
-                "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
+                # "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,  # More sensitive for telephony
+                # "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,  # Faster end detection
                 "prefix_padding_ms": 20,  # Default value
                 "silence_duration_ms": 500  # Shorter silence to detect end of speech faster
             }
