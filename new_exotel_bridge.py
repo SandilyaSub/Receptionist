@@ -12,21 +12,14 @@ import json
 import logging
 import time
 import uuid
-import threading
-import sys
-import warnings
-import audioop
-import base64
 from datetime import datetime
 from typing import Optional, Dict, Any
 import requests
 from requests.auth import HTTPBasicAuth
-from flask import Flask, request, jsonify
-import httpx
 
 # Import our custom modules
-# from gemini_session import GeminiSession
-# from transcript_manager import TranscriptManager
+from gemini_session import GeminiSession
+from transcript_manager import TranscriptManager
 from handover_service import HandoverService
 
 
@@ -2285,140 +2278,6 @@ class ExotelGeminiBridge:
         
         return tenant
     
-    def _start_http_server(self):
-        """Start Flask HTTP server in a separate thread for handover endpoint."""
-        def run_flask():
-            app = Flask(__name__)
-            app.logger.setLevel(logging.WARNING)  # Reduce Flask logging verbosity
-            
-            @app.route('/exotel/connect', methods=['GET'])
-            def handle_exotel_connect():
-                """Handle Exotel Connect applet requests for call handover."""
-                try:
-                    # Extract query parameters from Exotel
-                    call_sid = request.args.get('CallSid')
-                    call_from = request.args.get('CallFrom')
-                    call_to = request.args.get('CallTo')
-                    direction = request.args.get('Direction')
-                    
-                    self.logger.info(f"Exotel Connect request - CallSid: {call_sid}, From: {call_from}, To: {call_to}, Direction: {direction}")
-                    
-                    if not call_sid:
-                        self.logger.error("No CallSid provided in connect request")
-                        return jsonify({"error": "CallSid is required"}), 400
-                    
-                    # Extract tenant from call_to or use default
-                    tenant = self._extract_tenant_from_number(call_to)
-                    
-                    # Get handover details from database
-                    handover_service = HandoverService(tenant)
-                    
-                    # Use asyncio.run to handle async database call in Flask context
-                    import asyncio
-                    try:
-                        handover_details = asyncio.run(handover_service.get_handover_details(call_sid))
-                    except Exception as db_error:
-                        self.logger.error(f"Database error retrieving handover details: {db_error}")
-                        return jsonify({"error": "Database error"}), 500
-                    
-                    if not handover_details:
-                        self.logger.warning(f"No handover details found for CallSid: {call_sid}")
-                        # Return empty destination array as per Exotel documentation
-                        return jsonify({
-                            "fetch_after_attempt": False,
-                            "destination": {
-                                "numbers": []
-                            }
-                        })
-                    
-                    # Check if handover is requested
-                    if handover_details.get('handover_requested') != 'yes':
-                        self.logger.info(f"No handover requested for CallSid: {call_sid}")
-                        # Return empty destination array for no handover cases
-                        return jsonify({
-                            "fetch_after_attempt": False,
-                            "destination": {
-                                "numbers": []
-                            }
-                        })
-                    
-                    # Get the handover number
-                    handover_number = handover_details.get('handover_number')
-                    if not handover_number:
-                        self.logger.error(f"No handover number available for CallSid: {call_sid}")
-                        # Return empty destination array if no number available
-                        return jsonify({
-                            "fetch_after_attempt": False,
-                            "destination": {
-                                "numbers": []
-                            }
-                        })
-                    
-                    # Create Exotel Connect response with handover number
-                    handover_reason = handover_details.get('handover_reason', 'escalation')
-                    playback_message = self._get_agent_playback_message(handover_reason)
-                    
-                    connect_response = {
-                        "fetch_after_attempt": False,
-                        "destination": {
-                            "numbers": [handover_number]
-                        },
-                        "record": True,
-                        "recording_channels": "dual",
-                        "max_ringing_duration": 45,
-                        "max_conversation_duration": 3600,
-                        "music_on_hold": {
-                            "type": "operator_tone"
-                        }
-                    }
-                    
-                    # Add agent briefing message if available
-                    if playback_message:
-                        connect_response["start_call_playback"] = {
-                            "playback_to": "callee",
-                            "type": "text",
-                            "value": playback_message
-                        }
-                    
-                    self.logger.info(f"Returning connect response for CallSid: {call_sid} -> {handover_number}")
-                    return jsonify(connect_response)
-                    
-                except Exception as e:
-                    self.logger.error(f"Error handling Exotel connect request: {e}")
-                    return jsonify({"error": "Internal server error"}), 500
-            
-            @app.route('/health', methods=['GET'])
-            def health_check():
-                """Health check endpoint for the HTTP server."""
-                return jsonify({"status": "healthy", "service": "exotel-connect-handler"})
-            
-            # Start Flask server
-            http_port = int(os.environ.get('HTTP_PORT', 5678))
-            self.logger.info(f"Starting HTTP server on port {http_port} for handover endpoint")
-            app.run(host='0.0.0.0', port=http_port, debug=False, use_reloader=False)
-        
-        # Start Flask in a daemon thread
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        self.logger.info("HTTP server thread started")
-    
-    def _extract_tenant_from_number(self, phone_number: str) -> str:
-        """Extract tenant from phone number or return default."""
-        # This is a placeholder - implement based on your tenant-to-number mapping
-        # For now, return default tenant
-        return 'bakery'
-    
-    def _get_agent_playback_message(self, handover_reason: str) -> str:
-        """Get appropriate playback message for the agent based on handover reason."""
-        messages = {
-            'escalation': "You have an escalated call from our AI assistant. The customer requested to speak with a manager.",
-            'connect_to_manager': "You have a call transfer from our AI assistant. The customer requested to speak with a manager.",
-            'could_not_answer': "You have a call transfer from our AI assistant. The customer had a query that required human assistance.",
-            'emergency': "URGENT: You have an emergency call transfer from our AI assistant. Please handle immediately."
-        }
-        
-        return messages.get(handover_reason, "You have a call transfer from our AI assistant.")
-    
     async def start_server(self):
         """Start the WebSocket server."""
         self.logger.info(f"Starting multi-tenant Exotel-Gemini Bridge server on {self.host}:{self.port}{self.base_path}")
@@ -2427,10 +2286,6 @@ class ExotelGeminiBridge:
         # DEAD CODE REMOVED: Tenant greeting configurations startup loading
         # This was used for database-driven greeting system, now replaced with prompt parsing
         self.logger.info("Server startup: Using prompt-based greeting system (no cache loading needed)")
-        
-        # Start Flask HTTP server in a separate thread for handover endpoint
-        # TEMPORARILY DISABLED: Testing hypothesis that HTTP server causes port conflicts on Railway
-        # self._start_http_server()
         
         # Create a WebSocket server
         async def handler(websocket, path=None):
