@@ -1346,17 +1346,21 @@ class GeminiSession:
                                 else:
                                     self.logger.warning("Cannot add text to transcript: transcript_manager is None")
                                 
-                                # Check for escalation termination keywords in Gemini's response
-                                escalation_keywords = [
-                                    "let me connect you to our manager",
-                                    "connect you right away",
-                                    "speak with our manager",
-                                    "transfer you to",
-                                    "please hold on"
+                                # Check for escalation termination patterns in Gemini's response using regex
+                                import re
+                                escalation_patterns = [
+                                    r'connect.*you.*(to|with).*manager',
+                                    r'transfer.*you.*manager',
+                                    r'transferring.*you.*manager', 
+                                    r'please hold on',
+                                    r'hold on',
+                                    r'connect.*right away',
+                                    r'manager.*now'
                                 ]
                                 
                                 text_lower = text.lower()
-                                if any(keyword in text_lower for keyword in escalation_keywords):
+                                escalation_detected = any(re.search(pattern, text_lower) for pattern in escalation_patterns)
+                                if escalation_detected:
                                     self.logger.info(f"🔄 Escalation detected in Gemini response: '{text}'")
                                     self.logger.info("🚩 Triggering coordinated shutdown for call transfer")
                                     
