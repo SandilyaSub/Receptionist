@@ -1345,6 +1345,30 @@ class GeminiSession:
                                     self.transcript_manager.add_to_transcript("assistant", text)
                                 else:
                                     self.logger.warning("Cannot add text to transcript: transcript_manager is None")
+                                
+                                # Check for escalation termination keywords in Gemini's response
+                                escalation_keywords = [
+                                    "let me connect you to our manager",
+                                    "connect you right away",
+                                    "speak with our manager",
+                                    "transfer you to",
+                                    "please hold on"
+                                ]
+                                
+                                text_lower = text.lower()
+                                if any(keyword in text_lower for keyword in escalation_keywords):
+                                    self.logger.info(f"🔄 Escalation detected in Gemini response: '{text}'")
+                                    self.logger.info("🚩 Triggering coordinated shutdown for call transfer")
+                                    
+                                    # Set shutdown flag to trigger termination
+                                    self.shutdown_requested = True
+                                    self.shutdown_reason = "escalation_requested"
+                                    
+                                    # Send coordinated farewell with escalation message
+                                    await self._send_coordinated_farewell("I understand you'd like to speak with our manager. Let me connect you right away. Please hold on.")
+                                    
+                                    # Break out of the response processing loop
+                                    return
                                     
                             # Process input audio transcription (user speech)
                             if hasattr(response, 'server_content'):
