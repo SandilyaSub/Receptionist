@@ -1296,46 +1296,40 @@ class GeminiSession:
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
                             
-                            # Log response structure for function call debugging
-                            self.logger.info(f"🔍 Response type: {type(response)}")
-                            if hasattr(response, 'server_content'):
-                                self.logger.info(f"🔍 Has server_content: {response.server_content is not None}")
-                            if hasattr(response, 'candidates'):
-                                self.logger.info(f"🔍 Has candidates: {response.candidates is not None}")
+                            # Only log when we have text responses (not audio chunks)
                             if hasattr(response, 'text') and response.text:
-                                self.logger.info(f"🔍 Response text: {response.text}")
+                                self.logger.info(f"💬 Gemini text: {response.text}")
                             
                             # Check for function calls in server content (Gemini Live API)
                             function_call_detected = False
                             function_call_data = None
                             
-                            # Check for function calls following Gemini API documentation structure
-                            # First check server_content structure (Live API)
+                            # Check for function calls in server_content structure
                             if hasattr(response, 'server_content') and response.server_content:
                                 server_content = response.server_content
+                                
+                                # Debug: Log server_content structure when we have text
+                                if hasattr(response, 'text') and response.text:
+                                    self.logger.info(f"🔍 server_content type: {type(server_content)}")
+                                    if hasattr(server_content, 'model_turn'):
+                                        self.logger.info(f"🔍 model_turn exists: {server_content.model_turn is not None}")
+                                        if server_content.model_turn and hasattr(server_content.model_turn, 'parts'):
+                                            self.logger.info(f"🔍 parts count: {len(server_content.model_turn.parts) if server_content.model_turn.parts else 0}")
+                                
                                 if hasattr(server_content, 'model_turn') and server_content.model_turn:
                                     model_turn = server_content.model_turn
                                     if hasattr(model_turn, 'parts') and model_turn.parts:
-                                        for part in model_turn.parts:
+                                        for i, part in enumerate(model_turn.parts):
+                                            # Debug: Log part structure when we have text
+                                            if hasattr(response, 'text') and response.text:
+                                                part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
+                                                self.logger.info(f"🔍 part[{i}] attributes: {part_attrs}")
+                                            
                                             if hasattr(part, 'function_call') and part.function_call:
                                                 self.logger.info("🔧 Function call detected in server_content.model_turn.parts")
                                                 function_call_data = part.function_call
                                                 function_call_detected = True
                                                 break
-                            
-                            # Also check standard API structure as fallback
-                            if not function_call_detected and hasattr(response, 'candidates') and response.candidates:
-                                for candidate in response.candidates:
-                                    if hasattr(candidate, 'content') and candidate.content:
-                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                                            for part in candidate.content.parts:
-                                                if hasattr(part, 'function_call') and part.function_call:
-                                                    self.logger.info("🔧 Function call detected in candidates.content.parts")
-                                                    function_call_data = part.function_call
-                                                    function_call_detected = True
-                                                    break
-                                    if function_call_detected:
-                                        break
                             
                             if function_call_detected:
                                 self.logger.info(f"🔧 Processing function call: {function_call_data.name}")
