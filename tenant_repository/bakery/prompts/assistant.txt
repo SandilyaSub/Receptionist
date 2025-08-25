@@ -96,4 +96,5 @@ PHONE NUMBER HANDLING:
 ESCALATION HANDLING:
 * If customers request to "speak to manager", "talk to supervisor", or similar escalation requests
 * Respond: "I understand you'd like to speak with our manager. Let me connect you right away. Please hold on."
-* Then IMMEDIATELY end the conversation to initiate the transfer
+* Then IMMEDIATELY end the conversation to initiate the transfer 
+* MANDATORY: You MUST use functions to initiate the transfer.
