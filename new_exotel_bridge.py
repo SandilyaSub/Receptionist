@@ -419,34 +419,28 @@ def load_system_prompt(tenant="bakery"):
 
 # Function to create Gemini configuration with tenant-specific prompt
 def create_gemini_config(tenant="bakery"):
-    """Create a Gemini configuration with tenant-specific prompt.
+    """Create a Gemini configuration with tenant-specific prompt and function calling."""
     
-    Args:
-        tenant: The tenant identifier (e.g., 'bakery', 'saloon')
-        
-    Returns:
-        A LiveConnectConfig object with the tenant-specific prompt
-    """
     # Load the tenant-specific prompt
     tenant_prompt = load_system_prompt(tenant)
     
-    # Define manager transfer function following Gemini API documentation
-    transfer_function = {
-        "name": "transfer_to_manager",
-        "description": "Call this function when a customer requests to speak with a manager or supervisor. This will initiate call transfer.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "customer_request": {
-                    "type": "string",
-                    "description": "The customer's exact request for manager transfer"
-                }
+    # Define manager transfer function using proper types
+    transfer_function = types.FunctionDeclaration(
+        name="transfer_to_manager",
+        description="Call this function when a customer requests to speak with a manager or supervisor. This will initiate call transfer.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "customer_request": types.Schema(
+                    type=types.Type.STRING,
+                    description="The customer's exact request for manager transfer"
+                )
             },
-            "required": ["customer_request"]
-        }
-    }
+            required=["customer_request"]
+        )
+    )
     
-    # Create tools configuration following Gemini API spec
+    # Create tools configuration with proper types
     tools = [types.Tool(function_declarations=[transfer_function])]
     
     # Create and return the configuration
@@ -1304,11 +1298,13 @@ class GeminiSession:
                             function_call_detected = False
                             function_call_data = None
                             
-                            # Check for function calls in server_content structure (regardless of text)
+                            # Enhanced function call detection - check multiple locations
+                            
+                            # Method 1: Check server_content.model_turn.parts (current method)
                             if hasattr(response, 'server_content') and response.server_content:
                                 server_content = response.server_content
                                 
-                                # Always log server_content structure for debugging
+                                # Debug logging for server_content structure
                                 self.logger.info(f"🔍 server_content type: {type(server_content)}")
                                 if hasattr(server_content, 'model_turn'):
                                     self.logger.info(f"🔍 model_turn exists: {server_content.model_turn is not None}")
@@ -1319,7 +1315,7 @@ class GeminiSession:
                                     model_turn = server_content.model_turn
                                     if hasattr(model_turn, 'parts') and model_turn.parts:
                                         for i, part in enumerate(model_turn.parts):
-                                            # Always log part structure for debugging
+                                            # Debug part structure
                                             part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
                                             self.logger.info(f"🔍 part[{i}] attributes: {part_attrs}")
                                             
@@ -1328,6 +1324,31 @@ class GeminiSession:
                                                 function_call_data = part.function_call
                                                 function_call_detected = True
                                                 break
+                            
+                            # Method 2: Check response.candidates (alternative location)
+                            if not function_call_detected and hasattr(response, 'candidates'):
+                                self.logger.info(f"🔍 Checking candidates: {len(response.candidates) if response.candidates else 0}")
+                                for i, candidate in enumerate(response.candidates):
+                                    if hasattr(candidate, 'content') and candidate.content:
+                                        if hasattr(candidate.content, 'parts'):
+                                            for j, part in enumerate(candidate.content.parts):
+                                                if hasattr(part, 'function_call') and part.function_call:
+                                                    self.logger.info(f"🔧 Function call detected in candidates[{i}].content.parts[{j}]")
+                                                    function_call_data = part.function_call
+                                                    function_call_detected = True
+                                                    break
+                                        if function_call_detected:
+                                            break
+                            
+                            # Method 3: Check direct parts attribute
+                            if not function_call_detected and hasattr(response, 'parts'):
+                                self.logger.info(f"🔍 Checking direct parts: {len(response.parts) if response.parts else 0}")
+                                for i, part in enumerate(response.parts):
+                                    if hasattr(part, 'function_call') and part.function_call:
+                                        self.logger.info(f"🔧 Function call detected in response.parts[{i}]")
+                                        function_call_data = part.function_call
+                                        function_call_detected = True
+                                        break
                             
                             if function_call_detected:
                                 self.logger.info(f"🔧 Processing function call: {function_call_data.name}")
@@ -1991,34 +2012,44 @@ class GeminiSession:
             # Don't raise - continue with normal flow
 
     async def _handle_function_calls(self, tool_call):
-        """Handle function calls from Gemini during live conversation."""
+        """Handle function calls from Gemini during live conversation with proper response format."""
         try:
             self.logger.info(f"🔧 Handling function call: {tool_call.name}")
+            self.logger.info(f"🔧 Function arguments: {tool_call.args}")
             
             if tool_call.name == "transfer_to_manager":
+                # Extract customer request from function arguments
+                customer_request = tool_call.args.get('customer_request', 'speak to manager')
+                self.logger.info(f"🔄 Processing manager transfer: '{customer_request}'")
+                
                 # Process manager transfer request
                 await self._handle_manager_transfer(tool_call)
                 
-                # Create function response following Gemini Live API spec
-                function_response = types.Part.from_function_response(
-                    name=tool_call.name,
-                    response={"result": "transfer_initiated", "status": "connecting_to_manager"}
-                )
-                
-                # Send function response back to Gemini
-                await self.gemini_session.send(types.ClientContent(
+                # Send function response back to Gemini with proper Live API format
+                function_response_content = types.ClientContent(
                     turns=[types.Turn(
                         role="user",
-                        parts=[function_response]
+                        parts=[types.Part.from_function_response(
+                            name=tool_call.name,
+                            response={
+                                "result": "transfer_initiated",
+                                "status": "connecting_to_manager",
+                                "message": f"Transfer request processed: {customer_request}"
+                            }
+                        )]
                     )]
-                ))
-                self.logger.info("✅ Sent function response to Gemini")
+                )
+                
+                await self.gemini_session.send(function_response_content)
+                self.logger.info("✅ Function response sent to Gemini")
+                
             else:
-                # Handle unknown function calls
                 self.logger.warning(f"⚠️ Unknown function call: {tool_call.name}")
                 
         except Exception as e:
-            self.logger.error(f"❌ Error handling function calls: {e}")
+            self.logger.error(f"❌ Error handling function call: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def _handle_manager_transfer(self, function_call):
         """Handle manager transfer request using existing inactivity termination mechanism."""
