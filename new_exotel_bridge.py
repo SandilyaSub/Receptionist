@@ -430,10 +430,34 @@ def create_gemini_config(tenant="bakery"):
     # Load the tenant-specific prompt
     tenant_prompt = load_system_prompt(tenant)
     
+    # Define handover function for explicit escalation triggers
+    handover_function = {
+        "name": "request_handover_to_human",
+        "description": "Call this function when a customer explicitly requests to speak with a human manager, supervisor, or when escalation is needed. This will immediately transfer the call to a human agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief reason for the handover request",
+                    "enum": ["escalation", "connect_to_manager", "complaint", "complex_issue", "dissatisfaction", "technical_support", "emergency"]
+                },
+                "customer_message": {
+                    "type": "string",
+                    "description": "The customer's message or request that triggered this handover"
+                }
+            },
+            "required": ["reason", "customer_message"]
+        }
+    }
+    
+    # Create tools configuration
+    tools = [{"function_declarations": [handover_function]}]
+    
     # Create and return the configuration
     # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
     # Using the simplest possible configuration to avoid payload errors
-    logging.info("Creating Gemini Live API configuration with simplified settings")
+    logging.info("Creating Gemini Live API configuration with simplified settings and handover function")
     
     # Create a configuration with optimized VAD settings using the correct enum types
     # Following documentation at https://ai.google.dev/gemini-api/docs/live-guide#automatic-vad-configuration
@@ -443,6 +467,8 @@ def create_gemini_config(tenant="bakery"):
             parts=[types.Part.from_text(text=tenant_prompt)],
             role="user"
         ),
+        # Add function calling tools
+        tools=tools,
         # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
         input_audio_transcription={},  # Empty dict enables input transcription
         output_audio_transcription={},  # Empty dict enables output transcription
@@ -1275,6 +1301,11 @@ class GeminiSession:
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
                             
+                            # Handle function calls from Gemini
+                            if hasattr(response, 'tool_call') and response.tool_call:
+                                self.logger.info("🔧 Function call detected from Gemini")
+                                await self._handle_function_calls(response.tool_call)
+                            
                             # Track conversation tokens if usage_metadata is available
                             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                                 self.conversation_tokens.append(response.usage_metadata)
@@ -1931,6 +1962,83 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"❌ Failed to send low volume warning: {e}")
             # Don't raise - continue with normal flow
+
+    async def _handle_function_calls(self, tool_call):
+        """Handle function calls from Gemini during live conversation."""
+        try:
+            function_responses = []
+            
+            for fc in tool_call.function_calls:
+                self.logger.info(f"🚨 Function call received: {fc.name} with args: {fc.args}")
+                
+                if fc.name == "request_handover_to_human":
+                    # Process handover function call immediately
+                    await self._handle_handover_function_call(fc)
+                    
+                    # Create function response
+                    function_response = types.FunctionResponse(
+                        id=fc.id,
+                        name=fc.name,
+                        response={"result": "handover_initiated", "status": "transferring_to_human"}
+                    )
+                    function_responses.append(function_response)
+                else:
+                    # Handle unknown function calls
+                    self.logger.warning(f"⚠️ Unknown function call: {fc.name}")
+                    function_response = types.FunctionResponse(
+                        id=fc.id,
+                        name=fc.name,
+                        response={"result": "error", "message": "Unknown function"}
+                    )
+                    function_responses.append(function_response)
+            
+            # Send function responses back to Gemini
+            if function_responses:
+                await self.gemini_session.send_tool_response(function_responses=function_responses)
+                self.logger.info(f"✅ Sent {len(function_responses)} function responses to Gemini")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error handling function calls: {e}")
+
+    async def _handle_handover_function_call(self, function_call):
+        """Handle handover function call from Gemini during live conversation."""
+        try:
+            # Extract parameters
+            reason = function_call.args.get('reason', 'escalation')
+            customer_message = function_call.args.get('customer_message', '')
+            
+            self.logger.info(f"🔄 Processing handover: reason={reason}, message='{customer_message}'")
+            
+            # Use enhanced HandoverService for immediate processing
+            from connect_service.handover_service import HandoverService
+            handover_service = HandoverService(self.tenant)
+            
+            # Create handover details immediately
+            handover_details = await handover_service.create_immediate_handover_details(reason, customer_message)
+            
+            # Store in database immediately if we have call_sid
+            if self.call_sid:
+                success = await handover_service.save_handover_details(self.call_sid, handover_details)
+                if success:
+                    self.logger.info(f"✅ Handover details saved for live call: {self.call_sid}")
+                    self.logger.info(f"📋 Handover summary: {handover_details}")
+                else:
+                    self.logger.error(f"❌ Failed to save handover details for call: {self.call_sid}")
+            else:
+                self.logger.warning("⚠️ No call_sid available for immediate handover storage")
+            
+            # Trigger coordinated shutdown for handover
+            self.logger.info("🚩 Triggering coordinated shutdown for handover")
+            self.shutdown_requested = True
+            self.shutdown_reason = "handover_requested_via_function"
+            
+            # Send farewell message (this will also trigger session cleanup)
+            await self._send_coordinated_farewell(
+                "I'm connecting you to our manager now. Please stay on the line."
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error handling handover function call: {e}")
 
     async def _send_coordinated_farewell(self, farewell_message: str):
         """Send farewell message to Gemini during coordinated shutdown.

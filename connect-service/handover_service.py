@@ -10,6 +10,7 @@ import json
 import re
 import os
 import sys
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
 # Add parent directory to path to import shared modules
@@ -107,6 +108,53 @@ class HandoverService:
             handover_details['handover_number'] = handover_number
             
         self.logger.info(f"Handover analysis result: {handover_details}")
+        return handover_details
+
+    async def create_immediate_handover_details(self, reason: str, customer_message: str) -> Dict:
+        """
+        Create handover details for immediate processing during live conversation.
+        
+        Args:
+            reason: Reason for handover from function call
+            customer_message: Customer's message that triggered handover
+            
+        Returns:
+            Dict containing handover details for immediate storage
+        """
+        self.logger.info(f"Creating immediate handover details: reason={reason}, message='{customer_message}'")
+        
+        # Map function call reasons to internal handover destinations
+        reason_mapping = {
+            'escalation': 'escalation',
+            'connect_to_manager': 'connect_to_manager',
+            'complaint': 'escalation',
+            'complex_issue': 'could_not_answer',
+            'dissatisfaction': 'escalation',
+            'technical_support': 'could_not_answer',
+            'emergency': 'emergency'
+        }
+        
+        # Get mapped reason or default to escalation
+        mapped_reason = reason_mapping.get(reason, 'escalation')
+        handover_to = self.handover_destinations.get(mapped_reason, 'branch_head')
+        
+        # Get handover number
+        handover_number = await self._get_handover_number(handover_to)
+        
+        # Create comprehensive handover details
+        handover_details = {
+            'handover_requested': 'yes',
+            'handover_reason': mapped_reason,
+            'handover_to': handover_to,
+            'handover_number': handover_number,
+            'customer_request': customer_message,
+            'original_function_reason': reason,
+            'triggered_at': 'live_conversation',
+            'timestamp': datetime.utcnow().isoformat(),
+            'processing_method': 'function_call'
+        }
+        
+        self.logger.info(f"Immediate handover details created: {handover_details}")
         return handover_details
 
     async def _get_handover_number(self, handover_to: str) -> str:
