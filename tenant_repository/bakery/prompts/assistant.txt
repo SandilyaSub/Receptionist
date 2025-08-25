@@ -95,7 +95,6 @@ PHONE NUMBER HANDLING:
 
 ESCALATION HANDLING:
 * If customers request to "speak to manager", "talk to supervisor", or similar escalation requests
-* Say: "Transferring your call to the manager. Please hold."
 * IMMEDIATELY call the transfer_to_manager function with the customer's exact request
 * Do NOT continue the conversation after calling the function 
 * MANDATORY: You MUST use functions to initiate the transfer.
