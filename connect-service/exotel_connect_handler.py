@@ -31,64 +31,86 @@ class ExotelConnectHandler:
         @app.route('/exotel/connect', methods=['GET'])
         def handle_connect_request():
             """
-            Handle Exotel Connect applet requests.
-            
-            Expected query parameters from Exotel:
-            - CallSid: Unique identifier of the call
-            - CallFrom: Number from which call is made/received
-            - CallTo: Number being dialed/where call landed
-            - Direction: 'incoming' or 'outbound-dial'
-            - Other parameters as per Exotel documentation
+            Handle Exotel Connect applet requests - simplified hardcoded response.
             """
             try:
                 # Log the incoming request
-                call_sid = request.args.get('CallSid')
+                call_sid = request.args.get('CallSid', 'unknown')
                 call_from = request.args.get('CallFrom')
                 call_to = request.args.get('CallTo')
                 direction = request.args.get('Direction')
                 
                 self.logger.info(f"Connect request received - CallSid: {call_sid}, From: {call_from}, To: {call_to}, Direction: {direction}")
                 
-                if not call_sid:
-                    self.logger.error("No CallSid provided in connect request")
-                    return jsonify({"error": "CallSid is required"}), 400
+                # Always return hardcoded response
+                response = {
+                    "fetch_after_attempt": False,
+                    "destination": {
+                        "numbers": ["+919901678665"]
+                    },
+                    "record": True,
+                    "recording_channels": "dual"
+                }
                 
-                # Extract tenant from call_to or use default
-                tenant = self._extract_tenant_from_number(call_to)
-                
-                # Get handover details from database
-                handover_service = HandoverService(tenant)
-                handover_details = asyncio.run(handover_service.get_handover_details(call_sid))
-                
-                if not handover_details:
-                    self.logger.warning(f"No handover details found for CallSid: {call_sid}")
-                    return jsonify({"error": "No handover details found"}), 404
-                
-                # Check if handover is requested
-                if handover_details.get('handover_requested') != 'yes':
-                    self.logger.info(f"No handover requested for CallSid: {call_sid}")
-                    return jsonify({"message": "No handover requested"}), 200
-                
-                # Get the handover number
-                handover_number = handover_details.get('handover_number')
-                if not handover_number:
-                    self.logger.error(f"No handover number available for CallSid: {call_sid}")
-                    return jsonify({"error": "No handover number available"}), 400
-                
-                # Create Exotel Connect response
-                connect_response = self._create_connect_response(handover_details)
-                
-                self.logger.info(f"Returning connect response for CallSid: {call_sid} -> {handover_number}")
-                return jsonify(connect_response)
+                self.logger.info(f"Returning hardcoded connect response: {response}")
+                return jsonify(response), 200
                 
             except Exception as e:
                 self.logger.error(f"Error handling connect request: {e}")
-                return jsonify({"error": "Internal server error"}), 500
+                # Return hardcoded response even on error
+                return jsonify({
+                    "fetch_after_attempt": False,
+                    "destination": {
+                        "numbers": ["+919901678665"]
+                    },
+                    "record": True,
+                    "recording_channels": "dual"
+                }), 200
         
         @app.route('/exotel/connect/health', methods=['GET'])
         def health_check():
             """Health check endpoint for the connect handler."""
             return jsonify({"status": "healthy", "service": "exotel-connect-handler"})
+        
+        @app.route('/connect', methods=['POST'])
+        def connect():
+            """
+            Handle Exotel connect requests and return hardcoded handover response.
+            
+            Simplified version that always returns the same response for testing.
+            """
+            try:
+                # Get request data for logging
+                data = request.get_json() or {}
+                call_sid = data.get('CallSid', 'unknown')
+                
+                self.logger.info(f"Connect request received for CallSid: {call_sid}")
+                self.logger.info(f"Request data: {data}")
+                
+                # Always return hardcoded response
+                response = {
+                    "fetch_after_attempt": False,
+                    "destination": {
+                        "numbers": ["+919901678665"]
+                    },
+                    "record": True,
+                    "recording_channels": "dual"
+                }
+                
+                self.logger.info(f"Returning hardcoded connect response: {response}")
+                return jsonify(response), 200
+                
+            except Exception as e:
+                self.logger.error(f"Error in connect handler: {e}")
+                # Return hardcoded response even on error
+                return jsonify({
+                    "fetch_after_attempt": False,
+                    "destination": {
+                        "numbers": ["+919901678665"]
+                    },
+                    "record": True,
+                    "recording_channels": "dual"
+                }), 200
         
         return app
     

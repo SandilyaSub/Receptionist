@@ -25,7 +25,7 @@ from requests.auth import HTTPBasicAuth
 # Import our custom modules
 # from gemini_session import GeminiSession
 # from transcript_manager import TranscriptManager
-from handover_service import HandoverService
+# from handover_service import HandoverService  # Removed for refactoring
 
 
 # Directory to store call transcripts
@@ -430,34 +430,29 @@ def create_gemini_config(tenant="bakery"):
     # Load the tenant-specific prompt
     tenant_prompt = load_system_prompt(tenant)
     
-    # Define handover function for explicit escalation triggers
-    handover_function = {
-        "name": "request_handover_to_human",
-        "description": "Call this function when a customer explicitly requests to speak with a human manager, supervisor, or when escalation is needed. This will immediately transfer the call to a human agent.",
+    # Define manager transfer function following Gemini API documentation
+    transfer_function = {
+        "name": "transfer_to_manager",
+        "description": "Call this function when a customer requests to speak with a manager or supervisor. This will initiate call transfer.",
         "parameters": {
             "type": "object",
             "properties": {
-                "reason": {
+                "customer_request": {
                     "type": "string",
-                    "description": "Brief reason for the handover request",
-                    "enum": ["escalation", "connect_to_manager", "complaint", "complex_issue", "dissatisfaction", "technical_support", "emergency"]
-                },
-                "customer_message": {
-                    "type": "string",
-                    "description": "The customer's message or request that triggered this handover"
+                    "description": "The customer's exact request for manager transfer"
                 }
             },
-            "required": ["reason", "customer_message"]
+            "required": ["customer_request"]
         }
     }
     
     # Create tools configuration following Gemini API spec
-    tools = [types.Tool(function_declarations=[handover_function])]
+    tools = [types.Tool(function_declarations=[transfer_function])]
     
     # Create and return the configuration
     # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
     # Using the simplest possible configuration to avoid payload errors
-    logging.info("Creating Gemini Live API configuration with simplified settings and handover function")
+    logging.info("Creating Gemini Live API configuration with manager transfer function")
     
     # Create a configuration with optimized VAD settings using the correct enum types
     # Following documentation at https://ai.google.dev/gemini-api/docs/live-guide#automatic-vad-configuration
@@ -1984,14 +1979,14 @@ class GeminiSession:
         try:
             self.logger.info(f"🔧 Handling function call: {tool_call.name}")
             
-            if tool_call.name == "request_handover_to_human":
-                # Process handover function call immediately
-                await self._handle_handover_function_call(tool_call)
+            if tool_call.name == "transfer_to_manager":
+                # Process manager transfer request
+                await self._handle_manager_transfer(tool_call)
                 
                 # Create function response following Gemini Live API spec
                 function_response = types.Part.from_function_response(
                     name=tool_call.name,
-                    response={"result": "handover_initiated", "status": "transferring_to_human"}
+                    response={"result": "transfer_initiated", "status": "connecting_to_manager"}
                 )
                 
                 # Send function response back to Gemini
@@ -2009,45 +2004,25 @@ class GeminiSession:
         except Exception as e:
             self.logger.error(f"❌ Error handling function calls: {e}")
 
-    async def _handle_handover_function_call(self, function_call):
-        """Handle handover function call from Gemini during live conversation."""
+    async def _handle_manager_transfer(self, function_call):
+        """Handle manager transfer request using existing inactivity termination mechanism."""
         try:
-            # Extract parameters
-            reason = function_call.args.get('reason', 'escalation')
-            customer_message = function_call.args.get('customer_message', '')
+            # Extract customer request
+            customer_request = function_call.args.get('customer_request', 'speak to manager')
             
-            self.logger.info(f"🔄 Processing handover: reason={reason}, message='{customer_message}'")
+            self.logger.info(f"🔄 Processing manager transfer request: '{customer_request}'")
             
-            # Use enhanced HandoverService for immediate processing
-            from connect_service.handover_service import HandoverService
-            handover_service = HandoverService(self.tenant)
-            
-            # Create handover details immediately
-            handover_details = await handover_service.create_immediate_handover_details(reason, customer_message)
-            
-            # Store in database immediately if we have call_sid
-            if self.call_sid:
-                success = await handover_service.save_handover_details(self.call_sid, handover_details)
-                if success:
-                    self.logger.info(f"✅ Handover details saved for live call: {self.call_sid}")
-                    self.logger.info(f"📋 Handover summary: {handover_details}")
-                else:
-                    self.logger.error(f"❌ Failed to save handover details for call: {self.call_sid}")
-            else:
-                self.logger.warning("⚠️ No call_sid available for immediate handover storage")
-            
-            # Trigger coordinated shutdown for handover
-            self.logger.info("🚩 Triggering coordinated shutdown for handover")
+            # Use existing inactivity termination mechanism with custom message
             self.shutdown_requested = True
-            self.shutdown_reason = "handover_requested_via_function"
+            self.shutdown_reason = "manager_transfer_requested"
             
-            # Send farewell message (this will also trigger session cleanup)
+            # Send transfer message using existing coordinated farewell system
             await self._send_coordinated_farewell(
-                "I'm connecting you to our manager now. Please stay on the line."
+                "Transferring your call to the manager. Please hold."
             )
             
         except Exception as e:
-            self.logger.error(f"❌ Error handling handover function call: {e}")
+            self.logger.error(f"❌ Error handling manager transfer: {e}")
 
     async def _send_coordinated_farewell(self, farewell_message: str):
         """Send farewell message to Gemini during coordinated shutdown.
@@ -2061,8 +2036,9 @@ class GeminiSession:
         self.logger.info(f"💬 Sending coordinated farewell: '{farewell_message}'")
         
         try:
-            # HANDOVER DETECTION: Analyze conversation for handover requests before farewell
-            await self._analyze_and_store_handover_details()
+            # Skip handover analysis for function-triggered transfers
+            if self.shutdown_reason != "manager_transfer_requested":
+                await self._analyze_and_store_handover_details()
             
             # Send farewell instruction to Gemini while session is still active
             if self.gemini_session:
@@ -2198,48 +2174,34 @@ class GeminiSession:
         self.logger.info(f"Background post-call processing finished for {self.session_id}")
 
     async def _analyze_and_store_handover_details(self):
-        """Analyze conversation for handover requests and store in database."""
+        """Store manager transfer flag in database for Railway connect handler."""
         try:
-            self.logger.info("🔍 Analyzing conversation for handover requests")
+            self.logger.info("📋 Storing manager transfer flag for connect handler")
             
-            # Get conversation transcript from transcript manager
-            conversation_text = ""
-            if self.transcript_manager and hasattr(self.transcript_manager, 'conversation_transcript'):
-                conversation_text = self.transcript_manager.conversation_transcript
-            elif hasattr(self, 'conversation_transcript'):
-                conversation_text = self.conversation_transcript
+            # Create simple handover details for manager transfer
+            handover_details = {
+                'handover_requested': 'yes',
+                'handover_reason': 'manager_transfer',
+                'handover_to': 'manager',
+                'handover_number': '+919901678665',
+                'timestamp': time.time()
+            }
             
-            if not conversation_text:
-                self.logger.warning("No conversation text available for handover analysis")
-                # Still create default handover details
-                handover_details = {
-                    'handover_requested': 'no',
-                    'handover_reason': 'just_hangup',
-                    'handover_to': '',
-                    'handover_number': ''
-                }
-            else:
-                # Initialize handover service
-                handover_service = HandoverService(self.tenant)
-                
-                # Analyze conversation for handover requests
-                handover_details = await handover_service.analyze_conversation_for_handover(conversation_text)
-            
-            # Store handover details in database (if we have call_sid)
+            # Store in database if we have call_sid
             if self.call_sid:
+                from connect_service.handover_service import HandoverService
                 handover_service = HandoverService(self.tenant)
                 success = await handover_service.save_handover_details(self.call_sid, handover_details)
                 
                 if success:
-                    self.logger.info(f"✅ Handover details saved for call_sid: {self.call_sid}")
-                    self.logger.info(f"📋 Handover summary: {handover_details}")
+                    self.logger.info(f"✅ Manager transfer flag saved for call_sid: {self.call_sid}")
                 else:
-                    self.logger.error(f"❌ Failed to save handover details for call_sid: {self.call_sid}")
+                    self.logger.error(f"❌ Failed to save manager transfer flag")
             else:
-                self.logger.warning("⚠️ No call_sid available, cannot save handover details to database")
+                self.logger.warning("⚠️ No call_sid available for transfer flag storage")
                 
         except Exception as e:
-            self.logger.error(f"❌ Error during handover analysis: {e}")
+            self.logger.error(f"❌ Error storing manager transfer flag: {e}")
             # Don't raise - this shouldn't break the call termination flow
 
     async def fetch_and_store_exotel_details(self):
