@@ -7,25 +7,17 @@ Built based on patterns from Gemini_Live_actual.py and Exotel's streaming exampl
 
 import os
 import asyncio
-import websockets
+import base64
 import json
 import logging
-import time
-import uuid
 import audioop
-import sys
+import uuid
+import time
 import warnings
-import httpx
-import base64
+import sys
 from datetime import datetime
-from typing import Optional, Dict, Any
-import requests
-from requests.auth import HTTPBasicAuth
-
-# Import our custom modules
-# from gemini_session import GeminiSession
-# from transcript_manager import TranscriptManager
-# from handover_service import HandoverService  # Removed for refactoring
+from typing import Dict, Optional
+import httpx
 
 
 # Directory to store call transcripts
@@ -237,10 +229,15 @@ if sys.version_info < (3, 11):
     asyncio.ExceptionGroup = ExceptionGroup
 
 import websockets
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+from google.generativeai import types
+from google.generativeai.types import HarmCategory, HarmBlockThreshold, FunctionResponse
 from dotenv import load_dotenv
 from supabase import create_client, Client
+
+# Import connect_service modules for function calling
+from connect_service.function_definitions import get_all_tools
+from connect_service.function_handlers import FunctionHandlers
 
 # Configure logging to both console and file
 log_dir = "logs"
@@ -419,34 +416,25 @@ def load_system_prompt(tenant="bakery"):
 
 # Function to create Gemini configuration with tenant-specific prompt
 def create_gemini_config(tenant="bakery"):
-    """Create a Gemini configuration with tenant-specific prompt and function calling."""
+    """Create a Gemini configuration with tenant-specific prompt.
     
+    Args:
+        tenant: The tenant identifier (e.g., 'bakery', 'saloon')
+        
+    Returns:
+        A LiveConnectConfig object with the tenant-specific prompt
+    """
     # Load the tenant-specific prompt
     tenant_prompt = load_system_prompt(tenant)
-    
-    # Define manager transfer function using proper types
-    transfer_function = types.FunctionDeclaration(
-        name="transfer_to_manager",
-        description="Call this function when a customer requests to speak with a manager or supervisor. This will initiate call transfer.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "customer_request": types.Schema(
-                    type=types.Type.STRING,
-                    description="The customer's exact request for manager transfer"
-                )
-            },
-            required=["customer_request"]
-        )
-    )
-    
-    # Create tools configuration with proper types
-    tools = [types.Tool(function_declarations=[transfer_function])]
     
     # Create and return the configuration
     # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
     # Using the simplest possible configuration to avoid payload errors
-    logging.info("Creating Gemini Live API configuration with manager transfer function")
+    logging.info("Creating Gemini Live API configuration with simplified settings")
+    
+    # Get function definitions as tools
+    tools = get_all_tools()
+    logging.info(f"Adding {len(tools)} function tools to Gemini configuration")
     
     # Create a configuration with optimized VAD settings using the correct enum types
     # Following documentation at https://ai.google.dev/gemini-api/docs/live-guide#automatic-vad-configuration
@@ -456,8 +444,6 @@ def create_gemini_config(tenant="bakery"):
             parts=[types.Part.from_text(text=tenant_prompt)],
             role="user"
         ),
-        # Add function calling tools
-        tools=tools,
         # Enable audio transcription as per https://ai.google.dev/gemini-api/docs/live-guide
         input_audio_transcription={},  # Empty dict enables input transcription
         output_audio_transcription={},  # Empty dict enables output transcription
@@ -470,7 +456,9 @@ def create_gemini_config(tenant="bakery"):
                 "prefix_padding_ms": 20,  # Default value
                 "silence_duration_ms": 500  # Shorter silence to detect end of speech faster
             }
-        }
+        },
+        # Add function tools for function calling
+        tools=tools
     )
     
     # Log the configuration for debugging
@@ -537,6 +525,9 @@ class GeminiSession:
         
         # Will be initialized later
         self.gemini_session = None
+        
+        # Initialize function handlers
+        self.function_handlers = None
         
         # Initialize state
         self.stream_sid = None
@@ -877,6 +868,9 @@ class GeminiSession:
                     model=model_name,
                     config=tenant_config
                 )
+                
+                # Initialize function handlers
+                self.function_handlers = FunctionHandlers()
                 
                 self.logger.info(f"Gemini session initialized successfully for tenant '{self.tenant}'")
                 return
@@ -1290,70 +1284,6 @@ class GeminiSession:
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
                             
-                            # Only log when we have text responses (not audio chunks)
-                            if hasattr(response, 'text') and response.text:
-                                self.logger.info(f"💬 Gemini text: {response.text}")
-                            
-                            # Check for function calls in server content (Gemini Live API)
-                            function_call_detected = False
-                            function_call_data = None
-                            
-                            # Enhanced function call detection - check multiple locations
-                            
-                            # Method 1: Check server_content.model_turn.parts (current method)
-                            if hasattr(response, 'server_content') and response.server_content:
-                                server_content = response.server_content
-                                
-                                # Debug logging for server_content structure
-                                self.logger.info(f"🔍 server_content type: {type(server_content)}")
-                                if hasattr(server_content, 'model_turn'):
-                                    self.logger.info(f"🔍 model_turn exists: {server_content.model_turn is not None}")
-                                    if server_content.model_turn and hasattr(server_content.model_turn, 'parts'):
-                                        self.logger.info(f"🔍 parts count: {len(server_content.model_turn.parts) if server_content.model_turn.parts else 0}")
-                                
-                                if hasattr(server_content, 'model_turn') and server_content.model_turn:
-                                    model_turn = server_content.model_turn
-                                    if hasattr(model_turn, 'parts') and model_turn.parts:
-                                        for i, part in enumerate(model_turn.parts):
-                                            # Debug part structure
-                                            part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
-                                            self.logger.info(f"🔍 part[{i}] attributes: {part_attrs}")
-                                            
-                                            if hasattr(part, 'function_call') and part.function_call:
-                                                self.logger.info("🔧 Function call detected in server_content.model_turn.parts")
-                                                function_call_data = part.function_call
-                                                function_call_detected = True
-                                                break
-                            
-                            # Method 2: Check response.candidates (alternative location)
-                            if not function_call_detected and hasattr(response, 'candidates'):
-                                self.logger.info(f"🔍 Checking candidates: {len(response.candidates) if response.candidates else 0}")
-                                for i, candidate in enumerate(response.candidates):
-                                    if hasattr(candidate, 'content') and candidate.content:
-                                        if hasattr(candidate.content, 'parts'):
-                                            for j, part in enumerate(candidate.content.parts):
-                                                if hasattr(part, 'function_call') and part.function_call:
-                                                    self.logger.info(f"🔧 Function call detected in candidates[{i}].content.parts[{j}]")
-                                                    function_call_data = part.function_call
-                                                    function_call_detected = True
-                                                    break
-                                        if function_call_detected:
-                                            break
-                            
-                            # Method 3: Check direct parts attribute
-                            if not function_call_detected and hasattr(response, 'parts'):
-                                self.logger.info(f"🔍 Checking direct parts: {len(response.parts) if response.parts else 0}")
-                                for i, part in enumerate(response.parts):
-                                    if hasattr(part, 'function_call') and part.function_call:
-                                        self.logger.info(f"🔧 Function call detected in response.parts[{i}]")
-                                        function_call_data = part.function_call
-                                        function_call_detected = True
-                                        break
-                            
-                            if function_call_detected:
-                                self.logger.info(f"🔧 Processing function call: {function_call_data.name}")
-                                await self._handle_function_calls(function_call_data)
-                            
                             # Track conversation tokens if usage_metadata is available
                             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                                 self.conversation_tokens.append(response.usage_metadata)
@@ -1398,6 +1328,67 @@ class GeminiSession:
                                 
                                 self.logger.debug(f"Accumulated conversation token data: {total_tokens} total tokens")
                             
+                            # Check for function calls (both function_call and tool_call formats)
+                            function_call = None
+                            if hasattr(response, 'function_call') and response.function_call:
+                                function_call = response.function_call
+                                self.logger.info(f"Function call detected via function_call: {function_call.name}")
+                            elif hasattr(response, 'tool_call') and response.tool_call:
+                                # Handle tool_call format (newer function call format)
+                                self.logger.info(f"Function call detected via tool_call: {response.tool_call}")
+                                for fc in response.tool_call.function_calls:
+                                    function_call = fc
+                                    self.logger.info(f"Found function in tool_call: {fc.name}")
+                                    break
+                            
+                            # Process function call if found
+                            if function_call and self.function_handlers:
+                                try:
+                                    # Handle args - could be a dict or a JSON string
+                                    if isinstance(function_call.args, dict):
+                                        args = function_call.args
+                                    else:
+                                        args = json.loads(function_call.args)
+                                    
+                                    self.logger.info(f"Function arguments: {args}")
+                                    
+                                    # Get the handler method dynamically
+                                    handler_name = function_call.name
+                                    if hasattr(self.function_handlers, handler_name):
+                                        handler_method = getattr(self.function_handlers, handler_name)
+                                        
+                                        # Call the function handler
+                                        result = await handler_method(args)
+                                        self.logger.info(f"Function result: {result}")
+                                        
+                                        # Send function response back to Gemini
+                                        # Handle both response formats
+                                        if hasattr(response, 'function_call'):
+                                            await self.gemini_session.send_function_response(
+                                                name=function_call.name,
+                                                response=json.dumps(result),
+                                            )
+                                        else:
+                                            # For tool_call format
+                                            function_response = types.FunctionResponse(
+                                                id=function_call.id,
+                                                name=function_call.name,
+                                                response=result
+                                            )
+                                            await self.gemini_session.send_tool_response(function_responses=[function_response])
+                                        
+                                        # Check if call has been ended by the function handler
+                                        if hasattr(self.function_handlers, 'call_ended') and self.function_handlers.call_ended:
+                                            self.logger.info(f"Call ended by function handler: {handler_name}")
+                                            self.shutdown_requested = True
+                                            self.shutdown_reason = f"Call ended by function: {handler_name}"
+                                    else:
+                                        self.logger.warning(f"No handler method found for function: {handler_name}")
+                                except Exception as e:
+                                    self.logger.error(f"Error handling function call: {str(e)}")
+                                    import traceback
+                                    traceback.print_exc()
+                            
                             # Extract audio data from response
                             audio_data = None
                             
@@ -1424,34 +1415,6 @@ class GeminiSession:
                                     self.transcript_manager.add_to_transcript("assistant", text)
                                 else:
                                     self.logger.warning("Cannot add text to transcript: transcript_manager is None")
-                                
-                                # Check for escalation termination patterns in Gemini's response using regex
-                                import re
-                                escalation_patterns = [
-                                    r'connect.*you.*(to|with).*manager',
-                                    r'transfer.*you.*manager',
-                                    r'transferring.*you.*manager', 
-                                    r'please hold on',
-                                    r'hold on',
-                                    r'connect.*right away',
-                                    r'manager.*now'
-                                ]
-                                
-                                text_lower = text.lower()
-                                escalation_detected = any(re.search(pattern, text_lower) for pattern in escalation_patterns)
-                                if escalation_detected:
-                                    self.logger.info(f"🔄 Escalation detected in Gemini response: '{text}'")
-                                    self.logger.info("🚩 Triggering coordinated shutdown for call transfer")
-                                    
-                                    # Set shutdown flag to trigger termination
-                                    self.shutdown_requested = True
-                                    self.shutdown_reason = "escalation_requested"
-                                    
-                                    # Send coordinated farewell with escalation message
-                                    await self._send_coordinated_farewell("I understand you'd like to speak with our manager. Let me connect you right away. Please hold on.")
-                                    
-                                    # Break out of the response processing loop
-                                    return
                                     
                             # Process input audio transcription (user speech)
                             if hasattr(response, 'server_content'):
@@ -2011,66 +1974,6 @@ class GeminiSession:
             self.logger.error(f"❌ Failed to send low volume warning: {e}")
             # Don't raise - continue with normal flow
 
-    async def _handle_function_calls(self, tool_call):
-        """Handle function calls from Gemini during live conversation with proper response format."""
-        try:
-            self.logger.info(f"🔧 Handling function call: {tool_call.name}")
-            self.logger.info(f"🔧 Function arguments: {tool_call.args}")
-            
-            if tool_call.name == "transfer_to_manager":
-                # Extract customer request from function arguments
-                customer_request = tool_call.args.get('customer_request', 'speak to manager')
-                self.logger.info(f"🔄 Processing manager transfer: '{customer_request}'")
-                
-                # Process manager transfer request
-                await self._handle_manager_transfer(tool_call)
-                
-                # Send function response back to Gemini with proper Live API format
-                function_response_content = types.ClientContent(
-                    turns=[types.Turn(
-                        role="user",
-                        parts=[types.Part.from_function_response(
-                            name=tool_call.name,
-                            response={
-                                "result": "transfer_initiated",
-                                "status": "connecting_to_manager",
-                                "message": f"Transfer request processed: {customer_request}"
-                            }
-                        )]
-                    )]
-                )
-                
-                await self.gemini_session.send(function_response_content)
-                self.logger.info("✅ Function response sent to Gemini")
-                
-            else:
-                self.logger.warning(f"⚠️ Unknown function call: {tool_call.name}")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error handling function call: {e}")
-            import traceback
-            traceback.print_exc()
-
-    async def _handle_manager_transfer(self, function_call):
-        """Handle manager transfer request using existing inactivity termination mechanism."""
-        try:
-            # Extract customer request
-            customer_request = function_call.args.get('customer_request', 'speak to manager')
-            
-            self.logger.info(f"🔄 Processing manager transfer request: '{customer_request}'")
-            
-            # Use existing inactivity termination mechanism with custom message
-            self.shutdown_requested = True
-            self.shutdown_reason = "manager_transfer_requested"
-            
-            # Send transfer message using existing coordinated farewell system
-            await self._send_coordinated_farewell(
-                "Transferring your call to the manager. Please hold."
-            )
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error handling manager transfer: {e}")
-
     async def _send_coordinated_farewell(self, farewell_message: str):
         """Send farewell message to Gemini during coordinated shutdown.
         
@@ -2083,10 +1986,6 @@ class GeminiSession:
         self.logger.info(f"💬 Sending coordinated farewell: '{farewell_message}'")
         
         try:
-            # Skip handover analysis for function-triggered transfers
-            if self.shutdown_reason != "manager_transfer_requested":
-                await self._analyze_and_store_handover_details()
-            
             # Send farewell instruction to Gemini while session is still active
             if self.gemini_session:
                 # Mark when farewell delivery starts (for Exotel task timing)
@@ -2219,37 +2118,6 @@ class GeminiSession:
             self.gemini_session = None
 
         self.logger.info(f"Background post-call processing finished for {self.session_id}")
-
-    async def _analyze_and_store_handover_details(self):
-        """Store manager transfer flag in database for Railway connect handler."""
-        try:
-            self.logger.info("📋 Storing manager transfer flag for connect handler")
-            
-            # Create simple handover details for manager transfer
-            handover_details = {
-                'handover_requested': 'yes',
-                'handover_reason': 'manager_transfer',
-                'handover_to': 'manager',
-                'handover_number': '+919901678665',
-                'timestamp': time.time()
-            }
-            
-            # Store in database if we have call_sid
-            if self.call_sid:
-                from connect_service.handover_service import HandoverService
-                handover_service = HandoverService(self.tenant)
-                success = await handover_service.save_handover_details(self.call_sid, handover_details)
-                
-                if success:
-                    self.logger.info(f"✅ Manager transfer flag saved for call_sid: {self.call_sid}")
-                else:
-                    self.logger.error(f"❌ Failed to save manager transfer flag")
-            else:
-                self.logger.warning("⚠️ No call_sid available for transfer flag storage")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error storing manager transfer flag: {e}")
-            # Don't raise - this shouldn't break the call termination flow
 
     async def fetch_and_store_exotel_details(self):
         """Fetches call details from Exotel and stores them in Supabase."""

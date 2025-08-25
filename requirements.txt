@@ -4,7 +4,7 @@ uvicorn
 websockets>=11.0.3
 
 # Google Gemini
-google-genai>=1.21.0
+google-genai
 jsonschema
 
 # Google Calendar API
@@ -15,13 +15,11 @@ google-auth-oauthlib>=1.0.0
 pytz>=2023.3
 
 # Database
-supabase>=2.10.0
+supabase>=2.0.0
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv
 aiohttp
-requests==2.32.3
-flask==3.0.0
 
 # Python version compatibility
 taskgroup
