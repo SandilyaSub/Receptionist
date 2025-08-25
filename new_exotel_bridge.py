@@ -229,9 +229,8 @@ if sys.version_info < (3, 11):
     asyncio.ExceptionGroup = ExceptionGroup
 
 import websockets
-import google.generativeai as genai
-from google.generativeai import types
-from google.generativeai.types import HarmCategory, HarmBlockThreshold, FunctionResponse
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -964,6 +963,11 @@ class GeminiSession:
                         self.gemini_session = session
                         self.logger.info("Gemini session connected")
                         
+                        # Update function handlers with the active session
+                        if self.function_handlers:
+                            self.function_handlers.set_session(self.gemini_session)
+                            self.logger.info("Function handlers updated with active Gemini session")
+                        
                         # Send dynamic initial greeting based on tenant configuration
                         await self.send_dynamic_initial_greeting()
                         
@@ -1328,67 +1332,6 @@ class GeminiSession:
                                 
                                 self.logger.debug(f"Accumulated conversation token data: {total_tokens} total tokens")
                             
-                            # Check for function calls (both function_call and tool_call formats)
-                            function_call = None
-                            if hasattr(response, 'function_call') and response.function_call:
-                                function_call = response.function_call
-                                self.logger.info(f"Function call detected via function_call: {function_call.name}")
-                            elif hasattr(response, 'tool_call') and response.tool_call:
-                                # Handle tool_call format (newer function call format)
-                                self.logger.info(f"Function call detected via tool_call: {response.tool_call}")
-                                for fc in response.tool_call.function_calls:
-                                    function_call = fc
-                                    self.logger.info(f"Found function in tool_call: {fc.name}")
-                                    break
-                            
-                            # Process function call if found
-                            if function_call and self.function_handlers:
-                                try:
-                                    # Handle args - could be a dict or a JSON string
-                                    if isinstance(function_call.args, dict):
-                                        args = function_call.args
-                                    else:
-                                        args = json.loads(function_call.args)
-                                    
-                                    self.logger.info(f"Function arguments: {args}")
-                                    
-                                    # Get the handler method dynamically
-                                    handler_name = function_call.name
-                                    if hasattr(self.function_handlers, handler_name):
-                                        handler_method = getattr(self.function_handlers, handler_name)
-                                        
-                                        # Call the function handler
-                                        result = await handler_method(args)
-                                        self.logger.info(f"Function result: {result}")
-                                        
-                                        # Send function response back to Gemini
-                                        # Handle both response formats
-                                        if hasattr(response, 'function_call'):
-                                            await self.gemini_session.send_function_response(
-                                                name=function_call.name,
-                                                response=json.dumps(result),
-                                            )
-                                        else:
-                                            # For tool_call format
-                                            function_response = types.FunctionResponse(
-                                                id=function_call.id,
-                                                name=function_call.name,
-                                                response=result
-                                            )
-                                            await self.gemini_session.send_tool_response(function_responses=[function_response])
-                                        
-                                        # Check if call has been ended by the function handler
-                                        if hasattr(self.function_handlers, 'call_ended') and self.function_handlers.call_ended:
-                                            self.logger.info(f"Call ended by function handler: {handler_name}")
-                                            self.shutdown_requested = True
-                                            self.shutdown_reason = f"Call ended by function: {handler_name}"
-                                    else:
-                                        self.logger.warning(f"No handler method found for function: {handler_name}")
-                                except Exception as e:
-                                    self.logger.error(f"Error handling function call: {str(e)}")
-                                    import traceback
-                                    traceback.print_exc()
-                            
                             # Extract audio data from response
                             audio_data = None
                             
@@ -1415,6 +1358,59 @@ class GeminiSession:
                                     self.transcript_manager.add_to_transcript("assistant", text)
                                 else:
                                     self.logger.warning("Cannot add text to transcript: transcript_manager is None")
+                            
+                            # Handle function calls if any
+                            if hasattr(response, 'function_call') and response.function_call:
+                                self.logger.info(f"Function call detected: {response.function_call.name}")
+                                
+                                # Extract function name and parameters
+                                function_name = response.function_call.name
+                                function_params = {}
+                                
+                                # Parse function parameters
+                                if hasattr(response.function_call, 'args') and response.function_call.args:
+                                    try:
+                                        if isinstance(response.function_call.args, dict):
+                                            function_params = response.function_call.args
+                                        elif isinstance(response.function_call.args, str):
+                                            function_params = json.loads(response.function_call.args)
+                                    except Exception as e:
+                                        self.logger.error(f"Error parsing function parameters: {e}")
+                                
+                                # Log function call details
+                                self.logger.info(f"Function: {function_name}, Params: {function_params}")
+                                
+                                # Execute the function if we have a handler for it
+                                if self.function_handlers:
+                                    # Set the current session in the function handlers
+                                    self.function_handlers.set_session(self.gemini_session)
+                                    
+                                    # Execute the function
+                                    try:
+                                        if hasattr(self.function_handlers, function_name):
+                                            function_handler = getattr(self.function_handlers, function_name)
+                                            self.logger.info(f"Executing function handler for {function_name}")
+                                            result = await function_handler(function_params)
+                                            self.logger.info(f"Function result: {result}")
+                                            
+                                            # Send function result back to Gemini
+                                            await self.gemini_session.send_function_response(
+                                                name=function_name,
+                                                response=result
+                                            )
+                                            
+                                            # Check if the call should be ended (e.g., after transfer_to_manager)
+                                            if self.function_handlers.is_call_ended():
+                                                self.logger.info("Function handler requested call end")
+                                                self.shutdown_requested = True
+                                                self.shutdown_reason = "Function requested call end"
+                                        else:
+                                            self.logger.error(f"No handler found for function: {function_name}")
+                                    except Exception as e:
+                                        self.logger.error(f"Error executing function {function_name}: {e}")
+                                else:
+                                    self.logger.error("Function handlers not initialized")
+
                                     
                             # Process input audio transcription (user speech)
                             if hasattr(response, 'server_content'):
