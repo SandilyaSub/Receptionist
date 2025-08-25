@@ -5,8 +5,7 @@ This file contains JSON schema definitions for functions that can be called by G
 
 import json
 from typing import Dict, List, Any, Optional
-import google.generativeai as genai
-from google.generativeai.types import Tool
+from google.genai import types
 
 def get_transfer_to_manager_definition() -> Dict[str, Any]:
     """
@@ -186,19 +185,25 @@ def get_all_function_definitions() -> List[Dict[str, Any]]:
         get_send_confirmation_definition()
     ]
 
-def get_all_tools() -> List[Tool]:
+def get_all_tools() -> List[types.Tool]:
     """
     Get all function definitions wrapped as Gemini Tool objects.
     
     Returns:
-        List[Tool]: List of all function definitions as Tool objects
+        List[types.Tool]: List of all function definitions as Tool objects
     """
     function_definitions = get_all_function_definitions()
     tools = []
     
     for function_def in function_definitions:
-        tool = Tool(
-            function_declarations=[function_def]
+        tool = types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name=function_def['name'],
+                    description=function_def['description'],
+                    parameters=function_def['parameters']
+                )
+            ]
         )
         tools.append(tool)
     
