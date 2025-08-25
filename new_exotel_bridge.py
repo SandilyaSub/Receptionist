@@ -15,6 +15,7 @@ import uuid
 import time
 import warnings
 import sys
+import traceback
 from datetime import datetime
 from typing import Dict, Optional
 import httpx
@@ -1359,26 +1360,57 @@ class GeminiSession:
                                 else:
                                     self.logger.warning("Cannot add text to transcript: transcript_manager is None")
                             
-                            # Handle function calls if any
+                            # Handle function calls if any - check both function_call and tool_call formats
+                            function_call = None
+                            function_name = None
+                            function_params = {}
+                            function_id = None
+                            
+                            # Check for function_call format
                             if hasattr(response, 'function_call') and response.function_call:
-                                self.logger.info(f"Function call detected: {response.function_call.name}")
-                                
-                                # Extract function name and parameters
-                                function_name = response.function_call.name
-                                function_params = {}
+                                self.logger.info(f"Function call detected via function_call: {response.function_call.name}")
+                                function_call = response.function_call
+                                function_name = function_call.name
                                 
                                 # Parse function parameters
-                                if hasattr(response.function_call, 'args') and response.function_call.args:
+                                if hasattr(function_call, 'args') and function_call.args:
                                     try:
-                                        if isinstance(response.function_call.args, dict):
-                                            function_params = response.function_call.args
-                                        elif isinstance(response.function_call.args, str):
-                                            function_params = json.loads(response.function_call.args)
+                                        if isinstance(function_call.args, dict):
+                                            function_params = function_call.args
+                                        elif isinstance(function_call.args, str):
+                                            function_params = json.loads(function_call.args)
                                     except Exception as e:
                                         self.logger.error(f"Error parsing function parameters: {e}")
+                            
+                            # Check for tool_call format (alternative function call format)
+                            elif hasattr(response, 'tool_call') and response.tool_call:
+                                self.logger.info(f"Function call detected via tool_call: {response.tool_call}")
                                 
+                                # Tool call can contain multiple function calls
+                                if hasattr(response.tool_call, 'function_calls'):
+                                    for fc in response.tool_call.function_calls:
+                                        # We're looking for call_handover_function
+                                        if fc.name == "call_handover_function":
+                                            self.logger.info(f"Found call_handover_function in tool_call: {fc.name}")
+                                            function_call = fc
+                                            function_name = fc.name
+                                            function_id = fc.id
+                                            
+                                            # Parse function parameters
+                                            if hasattr(fc, 'args') and fc.args:
+                                                try:
+                                                    if isinstance(fc.args, dict):
+                                                        function_params = fc.args
+                                                    elif isinstance(fc.args, str):
+                                                        function_params = json.loads(fc.args)
+                                                except Exception as e:
+                                                    self.logger.error(f"Error parsing tool_call function parameters: {e}")
+                                            break
+                            
+                            # Process the function call if found (either via function_call or tool_call)
+                            if function_call and function_name:
                                 # Log function call details
-                                self.logger.info(f"Function: {function_name}, Params: {function_params}")
+                                self.logger.info(f"Function: {function_name}, Params: {function_params}, ID: {function_id}")
                                 
                                 # Execute the function if we have a handler for it
                                 if self.function_handlers:
@@ -1393,13 +1425,23 @@ class GeminiSession:
                                             result = await function_handler(function_params)
                                             self.logger.info(f"Function result: {result}")
                                             
-                                            # Send function result back to Gemini
-                                            await self.gemini_session.send_function_response(
-                                                name=function_name,
-                                                response=result
-                                            )
+                                            # Send function result back to Gemini - handle both response formats
+                                            if hasattr(response, 'function_call'):
+                                                # For function_call format
+                                                await self.gemini_session.send_function_response(
+                                                    name=function_name,
+                                                    response=result
+                                                )
+                                            else:
+                                                # For tool_call format
+                                                function_response = types.FunctionResponse(
+                                                    id=function_id,
+                                                    name=function_name,
+                                                    response=result
+                                                )
+                                                await self.gemini_session.send_tool_response(function_responses=[function_response])
                                             
-                                            # Check if the call should be ended (e.g., after transfer_to_manager)
+                                            # Check if the call should be ended (e.g., after call_handover_function)
                                             if self.function_handlers.is_call_ended():
                                                 self.logger.info("Function handler requested call end")
                                                 self.shutdown_requested = True
@@ -1408,6 +1450,7 @@ class GeminiSession:
                                             self.logger.error(f"No handler found for function: {function_name}")
                                     except Exception as e:
                                         self.logger.error(f"Error executing function {function_name}: {e}")
+                                        self.logger.error(traceback.format_exc())
                                 else:
                                     self.logger.error("Function handlers not initialized")
 
