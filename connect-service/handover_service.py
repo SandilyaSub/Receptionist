@@ -6,12 +6,13 @@ from AI to human agents during Gemini Live conversations.
 """
 
 import logging
-import json
-import re
 import os
+import re
+import json
 import sys
+from typing import Dict, List, Optional, Tuple
+from supabase import create_client, Client
 from datetime import datetime
-from typing import Dict, Optional, Tuple
 
 # Add parent directory to path to import shared modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -156,6 +157,39 @@ class HandoverService:
         
         self.logger.info(f"Immediate handover details created: {handover_details}")
         return handover_details
+
+    async def save_handover_details(self, call_sid: str, handover_details: Dict) -> bool:
+        """
+        Save handover details to database immediately for live conversation.
+        
+        Args:
+            call_sid: The call session ID
+            handover_details: Handover details dictionary to store
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.logger.info(f"Saving handover details for call {call_sid}: {handover_details}")
+            
+            # Convert handover details to JSON string for storage
+            handover_json = json.dumps(handover_details)
+            
+            # Update the calls table with handover details
+            response = self.supabase.table('calls').update({
+                'call_handover_details': handover_json
+            }).eq('call_sid', call_sid).execute()
+            
+            if response.data:
+                self.logger.info(f"✅ Successfully saved handover details for call {call_sid}")
+                return True
+            else:
+                self.logger.error(f"❌ No rows updated for call {call_sid}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error saving handover details for call {call_sid}: {e}")
+            return False
 
     async def _get_handover_number(self, handover_to: str) -> str:
         """

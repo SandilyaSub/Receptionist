@@ -1301,10 +1301,48 @@ class GeminiSession:
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
                             
-                            # Handle function calls from Gemini
+                            # Log response attributes for debugging function calls
+                            response_attrs = [attr for attr in dir(response) if not attr.startswith('_')]
+                            self.logger.info(f"🔍 Response attributes: {response_attrs}")
+                            
+                            # Log response type and content for debugging
+                            self.logger.info(f"🔍 Response type: {type(response)}")
+                            if hasattr(response, 'parts'):
+                                self.logger.info(f"🔍 Response has parts: {len(response.parts) if response.parts else 0}")
+                                if response.parts:
+                                    for i, part in enumerate(response.parts):
+                                        part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
+                                        self.logger.info(f"🔍 Part {i} attributes: {part_attrs}")
+                            
+                            # Handle function calls from Gemini - check multiple possible attributes
+                            function_call_detected = False
+                            function_call_data = None
+                            
+                            # Check for various function call attributes
                             if hasattr(response, 'tool_call') and response.tool_call:
-                                self.logger.info("🔧 Function call detected from Gemini")
-                                await self._handle_function_calls(response.tool_call)
+                                self.logger.info("🔧 Function call detected via tool_call")
+                                function_call_data = response.tool_call
+                                function_call_detected = True
+                            elif hasattr(response, 'function_call') and response.function_call:
+                                self.logger.info("🔧 Function call detected via function_call")
+                                function_call_data = response.function_call
+                                function_call_detected = True
+                            elif hasattr(response, 'parts') and response.parts:
+                                for part in response.parts:
+                                    if hasattr(part, 'function_call') and part.function_call:
+                                        self.logger.info("🔧 Function call detected in parts.function_call")
+                                        function_call_data = part.function_call
+                                        function_call_detected = True
+                                        break
+                                    elif hasattr(part, 'tool_call') and part.tool_call:
+                                        self.logger.info("🔧 Function call detected in parts.tool_call")
+                                        function_call_data = part.tool_call
+                                        function_call_detected = True
+                                        break
+                            
+                            if function_call_detected:
+                                self.logger.info(f"🔧 Processing function call: {function_call_data}")
+                                await self._handle_function_calls(function_call_data)
                             
                             # Track conversation tokens if usage_metadata is available
                             if hasattr(response, 'usage_metadata') and response.usage_metadata:
