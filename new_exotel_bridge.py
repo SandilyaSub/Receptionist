@@ -1304,26 +1304,24 @@ class GeminiSession:
                             function_call_detected = False
                             function_call_data = None
                             
-                            # Check for function calls in server_content structure
+                            # Check for function calls in server_content structure (regardless of text)
                             if hasattr(response, 'server_content') and response.server_content:
                                 server_content = response.server_content
                                 
-                                # Debug: Log server_content structure when we have text
-                                if hasattr(response, 'text') and response.text:
-                                    self.logger.info(f"🔍 server_content type: {type(server_content)}")
-                                    if hasattr(server_content, 'model_turn'):
-                                        self.logger.info(f"🔍 model_turn exists: {server_content.model_turn is not None}")
-                                        if server_content.model_turn and hasattr(server_content.model_turn, 'parts'):
-                                            self.logger.info(f"🔍 parts count: {len(server_content.model_turn.parts) if server_content.model_turn.parts else 0}")
+                                # Always log server_content structure for debugging
+                                self.logger.info(f"🔍 server_content type: {type(server_content)}")
+                                if hasattr(server_content, 'model_turn'):
+                                    self.logger.info(f"🔍 model_turn exists: {server_content.model_turn is not None}")
+                                    if server_content.model_turn and hasattr(server_content.model_turn, 'parts'):
+                                        self.logger.info(f"🔍 parts count: {len(server_content.model_turn.parts) if server_content.model_turn.parts else 0}")
                                 
                                 if hasattr(server_content, 'model_turn') and server_content.model_turn:
                                     model_turn = server_content.model_turn
                                     if hasattr(model_turn, 'parts') and model_turn.parts:
                                         for i, part in enumerate(model_turn.parts):
-                                            # Debug: Log part structure when we have text
-                                            if hasattr(response, 'text') and response.text:
-                                                part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
-                                                self.logger.info(f"🔍 part[{i}] attributes: {part_attrs}")
+                                            # Always log part structure for debugging
+                                            part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
+                                            self.logger.info(f"🔍 part[{i}] attributes: {part_attrs}")
                                             
                                             if hasattr(part, 'function_call') and part.function_call:
                                                 self.logger.info("🔧 Function call detected in server_content.model_turn.parts")
