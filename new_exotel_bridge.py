@@ -451,8 +451,8 @@ def create_gemini_config(tenant="bakery"):
         }
     }
     
-    # Create tools configuration
-    tools = [{"function_declarations": [handover_function]}]
+    # Create tools configuration following Gemini API spec
+    tools = [types.Tool(function_declarations=[handover_function])]
     
     # Create and return the configuration
     # According to the official documentation at https://ai.google.dev/gemini-api/docs/live-guide
@@ -1301,47 +1301,25 @@ class GeminiSession:
                         async for response in turn:
                             self.logger.debug(f"Received response from Gemini: {response}")
                             
-                            # Log response attributes for debugging function calls
-                            response_attrs = [attr for attr in dir(response) if not attr.startswith('_')]
-                            self.logger.info(f"🔍 Response attributes: {response_attrs}")
-                            
-                            # Log response type and content for debugging
-                            self.logger.info(f"🔍 Response type: {type(response)}")
-                            if hasattr(response, 'parts'):
-                                self.logger.info(f"🔍 Response has parts: {len(response.parts) if response.parts else 0}")
-                                if response.parts:
-                                    for i, part in enumerate(response.parts):
-                                        part_attrs = [attr for attr in dir(part) if not attr.startswith('_')]
-                                        self.logger.info(f"🔍 Part {i} attributes: {part_attrs}")
-                            
-                            # Handle function calls from Gemini - check multiple possible attributes
+                            # Check for function calls in server content (Gemini Live API)
                             function_call_detected = False
                             function_call_data = None
                             
-                            # Check for various function call attributes
-                            if hasattr(response, 'tool_call') and response.tool_call:
-                                self.logger.info("🔧 Function call detected via tool_call")
-                                function_call_data = response.tool_call
-                                function_call_detected = True
-                            elif hasattr(response, 'function_call') and response.function_call:
-                                self.logger.info("🔧 Function call detected via function_call")
-                                function_call_data = response.function_call
-                                function_call_detected = True
-                            elif hasattr(response, 'parts') and response.parts:
-                                for part in response.parts:
-                                    if hasattr(part, 'function_call') and part.function_call:
-                                        self.logger.info("🔧 Function call detected in parts.function_call")
-                                        function_call_data = part.function_call
-                                        function_call_detected = True
-                                        break
-                                    elif hasattr(part, 'tool_call') and part.tool_call:
-                                        self.logger.info("🔧 Function call detected in parts.tool_call")
-                                        function_call_data = part.tool_call
-                                        function_call_detected = True
-                                        break
+                            # Check for function calls in server_content (Gemini Live API structure)
+                            if hasattr(response, 'server_content') and response.server_content:
+                                server_content = response.server_content
+                                if hasattr(server_content, 'model_turn') and server_content.model_turn:
+                                    model_turn = server_content.model_turn
+                                    if hasattr(model_turn, 'parts') and model_turn.parts:
+                                        for part in model_turn.parts:
+                                            if hasattr(part, 'function_call') and part.function_call:
+                                                self.logger.info("🔧 Function call detected in server_content")
+                                                function_call_data = part.function_call
+                                                function_call_detected = True
+                                                break
                             
                             if function_call_detected:
-                                self.logger.info(f"🔧 Processing function call: {function_call_data}")
+                                self.logger.info(f"🔧 Processing function call: {function_call_data.name}")
                                 await self._handle_function_calls(function_call_data)
                             
                             # Track conversation tokens if usage_metadata is available
@@ -2004,36 +1982,29 @@ class GeminiSession:
     async def _handle_function_calls(self, tool_call):
         """Handle function calls from Gemini during live conversation."""
         try:
-            function_responses = []
+            self.logger.info(f"🔧 Handling function call: {tool_call.name}")
             
-            for fc in tool_call.function_calls:
-                self.logger.info(f"🚨 Function call received: {fc.name} with args: {fc.args}")
+            if tool_call.name == "request_handover_to_human":
+                # Process handover function call immediately
+                await self._handle_handover_function_call(tool_call)
                 
-                if fc.name == "request_handover_to_human":
-                    # Process handover function call immediately
-                    await self._handle_handover_function_call(fc)
-                    
-                    # Create function response
-                    function_response = types.FunctionResponse(
-                        id=fc.id,
-                        name=fc.name,
-                        response={"result": "handover_initiated", "status": "transferring_to_human"}
-                    )
-                    function_responses.append(function_response)
-                else:
-                    # Handle unknown function calls
-                    self.logger.warning(f"⚠️ Unknown function call: {fc.name}")
-                    function_response = types.FunctionResponse(
-                        id=fc.id,
-                        name=fc.name,
-                        response={"result": "error", "message": "Unknown function"}
-                    )
-                    function_responses.append(function_response)
-            
-            # Send function responses back to Gemini
-            if function_responses:
-                await self.gemini_session.send_tool_response(function_responses=function_responses)
-                self.logger.info(f"✅ Sent {len(function_responses)} function responses to Gemini")
+                # Create function response following Gemini Live API spec
+                function_response = types.Part.from_function_response(
+                    name=tool_call.name,
+                    response={"result": "handover_initiated", "status": "transferring_to_human"}
+                )
+                
+                # Send function response back to Gemini
+                await self.gemini_session.send(types.ClientContent(
+                    turns=[types.Turn(
+                        role="user",
+                        parts=[function_response]
+                    )]
+                ))
+                self.logger.info("✅ Sent function response to Gemini")
+            else:
+                # Handle unknown function calls
+                self.logger.warning(f"⚠️ Unknown function call: {tool_call.name}")
                 
         except Exception as e:
             self.logger.error(f"❌ Error handling function calls: {e}")
