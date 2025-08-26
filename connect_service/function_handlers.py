@@ -101,12 +101,11 @@ class FunctionHandlers:
                 handover_data['handover_numbers'].append(backup_number)
                 logger.info(f"Backup handover: {backup_department}")
             
-            # Store handover data asynchronously
+            # Store handover data synchronously
             if hasattr(self.session, 'call_sid'):
-                asyncio.create_task(self.store_handover_data(
-                    self.session.call_sid, 
-                    handover_data
-                ))
+                # Use direct call instead of creating a task
+                storage_result = self.store_handover_data(self.session.call_sid, handover_data)
+                logger.info(f"Handover data storage result: {storage_result}")
             
             # If we have a session, send a response to the user
             if self.session:
@@ -129,7 +128,7 @@ class FunctionHandlers:
             logger.error(f"Error in call_handover_function: {str(e)}")
             return {"success": False, "message": f"Error: {str(e)}"}    
             
-    async def store_handover_data(self, call_sid: str, handover_data: Dict[str, Any]) -> None:
+    def store_handover_data(self, call_sid: str, handover_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Store handover data in the database for the given call SID.
         
@@ -155,7 +154,11 @@ class FunctionHandlers:
                 
         except Exception as e:
             logger.error(f"Error storing handover data: {str(e)}")
-            # Don't raise the exception - this is a background task
+            # Return error information
+            return {"success": False, "error": str(e)}
+            
+        # Return success if no exceptions
+        return {"success": True}
 
 # For testing purposes
 if __name__ == "__main__":
