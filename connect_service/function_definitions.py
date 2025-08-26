@@ -10,28 +10,44 @@ from google.genai import types
 def get_call_handover_function_definition() -> Dict[str, Any]:
     """
     Define the schema for the call_handover_function.
-    This function allows Gemini to transfer a call to a manager when needed.
+    This function allows Gemini to transfer a call to appropriate department when needed.
     
     Returns:
         Dict[str, Any]: JSON schema definition for the call_handover_function
     """
     return {
         "name": "call_handover_function",
-        "description": "Transfer the call to a manager when the customer requests escalation or needs to speak with a human",
+        "description": "Transfer the call to the appropriate department when the customer requests escalation or needs to speak with a human",
         "parameters": {
             "type": "object",
             "properties": {
                 "customer_request": {
                     "type": "string",
-                    "description": "The exact phrase used by the customer to request speaking with a manager or human"
+                    "description": "The exact phrase used by the customer to request speaking with someone else"
                 },
                 "handover_reason": {
                     "type": "string",
-                    "enum": ["Escalation", "Complex Issue", "Customer Dissatisfaction", "Technical Problem", "Billing Question", "AI Limitation"],
-                    "description": "The reason for transferring the call to a manager"
+                    "enum": ["Escalation", "Complex Issue", "Customer Dissatisfaction", "Technical Problem", "Billing Question", "Medical Question", "Emergency", "AI Limitation"],
+                    "description": "The reason for transferring the call"
+                },
+                "department": {
+                    "type": "string",
+                    "description": "The department to transfer to based on customer needs"
+                },
+                "number": {
+                    "type": "string",
+                    "description": "The phone number to transfer to"
+                },
+                "backup_department": {
+                    "type": "string",
+                    "description": "Optional backup department if primary is unavailable"
+                },
+                "backup_number": {
+                    "type": "string",
+                    "description": "Optional backup phone number if primary is unavailable"
                 }
             },
-            "required": ["customer_request", "handover_reason"]
+            "required": ["customer_request", "department", "number"]
         }
     }
 
