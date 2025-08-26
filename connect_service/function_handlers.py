@@ -81,7 +81,7 @@ class FunctionHandlers:
             # If we have a session, send a response to the user
             if self.session:
                 response_text = "I'm transferring your call to a manager who can better assist you with this. Please hold while I connect you."
-                await self.session.send_model_content(turns={"parts": [{"text": response_text}]}, turn_complete=True)
+                await self.session.send_client_content(turns={"parts": [{"text": response_text}]})
                 
                 # Set the call as ended to stop the audio loop
                 self.call_ended = True
