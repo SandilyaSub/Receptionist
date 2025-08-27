@@ -6,17 +6,8 @@ to get phone numbers for call handover to human agents.
 """
 
 import logging
-import json
-import asyncio
 import os
-import sys
-from typing import Dict, Optional
 from flask import Flask, request, jsonify
-
-# Add parent directory to path to import shared modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from handover_service import HandoverService
 
 class ExotelConnectHandler:
     """Handler for Exotel Connect applet dynamic URL requests."""
@@ -113,78 +104,6 @@ class ExotelConnectHandler:
                 }), 200
         
         return app
-    
-    def _extract_tenant_from_number(self, phone_number: str) -> str:
-        """
-        Extract tenant from phone number or return default.
-        
-        Args:
-            phone_number: The phone number to analyze
-            
-        Returns:
-            Tenant name
-        """
-        # This is a placeholder - implement based on your tenant-to-number mapping
-        # For now, return default tenant
-        return 'bakery'
-    
-    def _create_connect_response(self, handover_details: Dict) -> Dict:
-        """
-        Create Exotel Connect applet response format.
-        
-        Args:
-            handover_details: Handover details from database
-            
-        Returns:
-            Formatted response for Exotel Connect applet
-        """
-        handover_number = handover_details.get('handover_number')
-        handover_reason = handover_details.get('handover_reason', 'escalation')
-        
-        # Create the response according to Exotel documentation
-        response = {
-            "fetch_after_attempt": False,
-            "destination": {
-                "numbers": [handover_number]
-            },
-            "record": True,
-            "recording_channels": "dual",
-            "max_ringing_duration": 45,
-            "max_conversation_duration": 3600,
-            "music_on_hold": {
-                "type": "operator_tone"
-            }
-        }
-        
-        # Add start call playback based on handover reason
-        playback_message = self._get_playback_message(handover_reason)
-        if playback_message:
-            response["start_call_playback"] = {
-                "playback_to": "callee",
-                "type": "text",
-                "value": playback_message
-            }
-        
-        return response
-    
-    def _get_playback_message(self, handover_reason: str) -> Optional[str]:
-        """
-        Get appropriate playback message for the agent based on handover reason.
-        
-        Args:
-            handover_reason: Reason for handover
-            
-        Returns:
-            Message to play to the agent
-        """
-        messages = {
-            'escalation': "You have an escalated call from our AI assistant. The customer requested to speak with a manager.",
-            'connect_to_manager': "You have a call transfer from our AI assistant. The customer requested to speak with a manager.",
-            'could_not_answer': "You have a call transfer from our AI assistant. The customer had a query that required human assistance.",
-            'emergency': "URGENT: You have an emergency call transfer from our AI assistant. Please handle immediately."
-        }
-        
-        return messages.get(handover_reason, "You have a call transfer from our AI assistant.")
 
 # Standalone Flask app for testing
 if __name__ == '__main__':

@@ -63,3 +63,8 @@ tenant_repository/bakery/prompts/assistant - older.txt
 tenant_repository/bakery/prompts/assistant copy 2.txt
 tenant_repository/sreedevi_dental_rjy/prompts/assistant copy.txt
 
+
+connect_service/handover_prompts/
+connect_service/test_handover.py
+tenant_repository/bakery/prompts/assistant copy.txt
+
