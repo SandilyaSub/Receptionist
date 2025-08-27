@@ -17,7 +17,7 @@ import warnings
 import sys
 import traceback
 from datetime import datetime
-from typing import Dict, Optional, List, Any, Tuple, Union
+from typing import Dict, Optional
 import httpx
 
 
@@ -105,18 +105,27 @@ class TranscriptManager:
         record_id = None
         try:
             # Step 1: Update the existing transcript data
-            data_to_update = {
-                "transcript": self.transcript_data
+            # Note: The row was created when the session started
+            data_to_insert = {
+                "session_id": self.session_id,
+                "tenant": self.tenant,
+                "transcript": self.transcript_data,
+                "call_sid": self.call_sid
             }
-            
-            self.logger.info(f"Updating transcript for session {self.session_id} in 'call_details'.")
-            response = self.supabase_client.table("call_details").update(data_to_update).eq("call_sid", self.call_sid).execute()
+            self.logger.info(f"Attempting to update transcript for session {self.session_id} in 'call_details'.")
+            response = self.supabase_client.table("call_details").update(data_to_insert).eq("call_sid", self.call_sid).execute()
             
             if response.data:
-                record_id = response.data[0]['id']
-                self.logger.info(f"Successfully updated transcript in Supabase with record ID: {record_id}")
+                # For update operations, we need to get the record ID separately
+                record_id_response = self.supabase_client.table("call_details").select("id").eq("call_sid", self.call_sid).execute()
+                if record_id_response.data:
+                    record_id = record_id_response.data[0]['id']
+                    self.logger.info(f"Successfully updated transcript in call_details with record ID: {record_id}")
+                else:
+                    self.logger.error(f"Failed to retrieve record ID for call_sid: {self.call_sid}")
+                    return
             else:
-                self.logger.error("Failed to update transcript in Supabase, no data returned.")
+                self.logger.error("Failed to update transcript in call_details, no data returned.")
                 return
 
         except Exception as e:
@@ -1059,19 +1068,13 @@ class GeminiSession:
                                 self.logger.info(f"Transcript manager initialized for call_id: {self.call_sid}")
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
                                 
-                                # Create initial call_details row synchronously
-                                self.logger.info("🔍 STARTING create_initial_call_details_row function")
-                                print("DEBUG: Starting create_initial_call_details_row function")
+                                # Create initial row in call_details table
                                 try:
-                                    # Get Supabase client
-                                    self.logger.info("🔍 Attempting to get Supabase client")
                                     from supabase_client import get_supabase_client
                                     supabase = get_supabase_client()
-                                    self.logger.info(f"🔍 Supabase client obtained: {supabase is not None}")
-                                    if supabase:
-                                        self.logger.info(f"Creating initial call_details row for call_sid: {self.call_sid}")
-                                        
-                                        # Prepare minimal initial data
+                                    
+                                    if self.call_sid and supabase:
+                                        self.logger.info(f"Creating initial row in call_details for call_sid: {self.call_sid}")
                                         initial_data = {
                                             "call_sid": self.call_sid,
                                             "session_id": self.session_id,
@@ -1080,21 +1083,11 @@ class GeminiSession:
                                             "to_number": self.to_number,
                                             "created_at": datetime.now().isoformat()
                                         }
-                                        
-                                        # Insert the initial row
-                                        response = supabase.table("call_details").insert(initial_data).execute()
-                                        
-                                        if hasattr(response, 'data') and response.data:
-                                            self.logger.info(f"Successfully created initial call_details row for call_sid: {self.call_sid}")
-                                        else:
-                                            self.logger.warning(f"Failed to create initial call_details row for call_sid: {self.call_sid}")
+                                        supabase.table("call_details").insert(initial_data).execute()
+                                        self.logger.info(f"Successfully created initial row in call_details for call_sid: {self.call_sid}")
                                 except Exception as e:
-                                    self.logger.error(f"Error creating initial call_details row: {str(e)}")
-                                    import traceback
-                                    self.logger.error(f"Traceback: {traceback.format_exc()}")
-                                    print(f"ERROR creating initial call_details row: {str(e)}")
-                                    print(f"Traceback: {traceback.format_exc()}")
-
+                                    self.logger.error(f"Error creating initial row in call_details: {str(e)}")
+                                    # Continue anyway - this is not critical for call flow
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
