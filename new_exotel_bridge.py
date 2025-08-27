@@ -974,7 +974,7 @@ class GeminiSession:
                         
                         # Update function handlers with the active session
                         if self.function_handlers:
-                            self.function_handlers.set_session(self.gemini_session)
+                            self.function_handlers.set_session(self)
                             self.logger.info("Function handlers updated with active Gemini session")
                         
                         # Send dynamic initial greeting based on tenant configuration
@@ -1441,7 +1441,7 @@ class GeminiSession:
                                 # Execute the function if we have a handler for it
                                 if self.function_handlers:
                                     # Set the current session in the function handlers
-                                    self.function_handlers.set_session(self.gemini_session)
+                                    self.function_handlers.set_session(self)
                                     
                                     # Execute the function
                                     try:
