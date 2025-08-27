@@ -934,6 +934,20 @@ class GeminiSession:
                 if self.call_sid:
                     self.logger.info(f"Initializing transcript manager for call {self.call_sid}")
 
+                    # Create initial row in call_details table
+                    if supabase:
+                        try:
+                            initial_data = {
+                                "call_sid": self.call_sid,
+                                "session_id": self.session_id,
+                                "tenant": self.tenant,
+                                "from_number": self.from_number,
+                                "to_number": self.to_number
+                            }
+                            supabase.table("call_details").insert(initial_data).execute()
+                            self.logger.info(f"Created initial call_details row for call_sid: {self.call_sid}")
+                        except Exception as e:
+                            self.logger.error(f"Error creating initial call_details row: {e}")
                     
                     # Create transcript manager with call details
                     self.transcript_manager = TranscriptManager(
