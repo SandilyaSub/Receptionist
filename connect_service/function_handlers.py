@@ -106,6 +106,8 @@ class FunctionHandlers:
                 # Use direct call instead of creating a task
                 storage_result = self.store_handover_data(self.session.call_sid, handover_data)
                 logger.info(f"Handover data storage result: {storage_result}")
+            else:
+                logger.error(f"Session does not have call_sid attribute. Session type: {type(self.session)}")
             
             # If we have a session, send a response to the user
             if self.session:
