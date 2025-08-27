@@ -19,7 +19,6 @@ import traceback
 from datetime import datetime
 from typing import Dict, Optional
 import httpx
-from supabase_client import get_supabase_client
 
 
 # Directory to store call transcripts
@@ -27,14 +26,6 @@ CALL_DETAILS_DIR = "call_details"
 
 # Ensure the call_details directory exists
 os.makedirs(CALL_DETAILS_DIR, exist_ok=True)
-
-# Global Supabase client
-supabase = None
-try:
-    supabase = get_supabase_client()
-    print(f"Global Supabase client initialized successfully")
-except Exception as e:
-    print(f"Error initializing global Supabase client: {e}")
 
 # TranscriptManager class for saving conversation transcripts and running analysis
 class TranscriptManager:
@@ -94,70 +85,56 @@ class TranscriptManager:
         return self.transcript_data
 
     async def save_transcript_and_analyze(self):
-        """Save the transcript to Supabase and run analysis."""
-        if not self.call_sid:
-            self.logger.error("Cannot save transcript: call_sid is not available")
-            return None
+        """Saves the transcript, analyzes it, and updates the record in Supabase."""
+        if not self.supabase_client:
+            self.logger.error("Supabase client not initialized. Cannot process transcript.")
+            return
+
+        if not self.transcript_data.get("conversation"):
+            self.logger.warning("No conversation to save, skipping transcript processing.")
+            return
+
+        # Add the final model text if it exists
+        if self.final_model_text:
+            self.add_to_transcript("assistant", self.final_model_text)
+            self.final_model_text = ""
+            
+        # Merge consecutive messages from the same role before saving
+        self._merge_consecutive_messages()
 
         record_id = None
         try:
-            # Use global supabase client
-            global supabase
-            self.supabase_client = supabase
-            
-            if not self.supabase_client:
-                self.logger.error("Global Supabase client is not available, attempting to initialize")
-                from supabase_client import get_supabase_client
-                self.supabase_client = get_supabase_client()
-            
-            # Add debug logging
-            self.logger.info(f"DEBUG: TranscriptManager using Supabase client type: {type(self.supabase_client)}")
-            
-            # Extract conversation tokens if available
-            conversation_tokens = None
-            if self.gemini_session:
-                try:
-                    conversation_tokens = self.gemini_session.extract_total_conversation_tokens()
-                    self.logger.info(f"Extracted conversation tokens: {conversation_tokens}")
-                    
-                    # Add aggregated conversation tokens to the accumulator if available
-                    if self.token_accumulator and conversation_tokens:
-                        self.token_accumulator.add_aggregated_conversation_tokens(conversation_tokens)
-                        self.logger.info(f"Successfully added conversation tokens to accumulator: {conversation_tokens['total_tokens']} tokens")
-                except Exception as e:
-                    self.logger.error(f"Error extracting conversation tokens: {e}")
-
-            # Prepare data for insertion
-            data_to_insert = {
-                "transcript": json.dumps(self.transcript_data),
-                "updated_at": datetime.now().isoformat(),
+            # Step 1: Update the existing row with transcript data
+            update_data = {
+                "transcript": self.transcript_data
             }
-            
-            if conversation_tokens:
-                data_to_insert["conversation_tokens"] = json.dumps(conversation_tokens)
-
-            # Update existing row instead of insert (row was created when session started)
-            self.logger.info(f"Updating call_details for call_sid: {self.call_sid}")
-            response = self.supabase_client.table("call_details").update(data_to_insert).eq("call_sid", self.call_sid).execute()
+            self.logger.info(f"Attempting to update transcript for session {self.session_id} in 'call_details'.")
+            response = self.supabase_client.table("call_details").update(update_data).eq("call_sid", self.call_sid).execute()
             
             if response.data:
-                record_id_response = self.supabase_client.table("call_details").select("id").eq("call_sid", self.call_sid).execute()
-                record_id = record_id_response.data[0]['id']
-                self.logger.info(f"Transcript saved to Supabase with record ID: {record_id}")
-                
-                # Save transcript to file as backup
-                filename = os.path.join(CALL_DETAILS_DIR, f"{self.call_sid}.json")
-                with open(filename, 'w') as f:
-                    json.dump(self.transcript_data, f, indent=2)
-                self.logger.info(f"Transcript saved to file: {filename}")
+                record_id = response.data[0]['id']
+                self.logger.info(f"Successfully updated transcript in Supabase with record ID: {record_id}")
             else:
-                self.logger.error(f"Failed to save transcript to Supabase: {response}")
-                return None
-                
+                self.logger.error("Failed to update transcript in Supabase, no data returned.")
+                return
+
         except Exception as e:
-            self.logger.error(f"Error saving transcript: {str(e)}")
-            traceback.print_exc()
-            return None
+            self.logger.error(f"Error updating transcript in Supabase: {e}")
+            return # Stop if update fails
+
+        # Extract conversation tokens from GeminiSession if available
+        if self.gemini_session and self.token_accumulator:
+            try:
+                conversation_token_data = self.gemini_session.extract_total_conversation_tokens()
+                if conversation_token_data:
+                    # Add aggregated conversation tokens to the accumulator
+                    self.token_accumulator.add_aggregated_conversation_tokens(conversation_token_data)
+                    self.logger.info(f"Successfully added conversation tokens to accumulator: {conversation_token_data['total_tokens']} tokens")
+                else:
+                    self.logger.warning("No conversation tokens were collected during the session")
+            except Exception as token_error:
+                self.logger.error(f"Error extracting conversation tokens: {token_error}")
+                # Continue with analysis even if token extraction fails
 
         try:
             # Step 2: Analyze the transcript (import locally to ensure config is loaded)
@@ -166,7 +143,7 @@ class TranscriptManager:
             analysis_result = await analyze_transcript(full_transcript_text, self.tenant, GEMINI_API_KEY, self.token_accumulator)
 
             # Step 3: Update the record with the analysis results
-            if analysis_result and record_id:
+            if analysis_result:
                 self.logger.info(f"Updating record {record_id} with analysis results.")
                 update_data = {
                     "call_type": analysis_result.get("call_type"),
@@ -174,13 +151,8 @@ class TranscriptManager:
                 }
                 self.supabase_client.table("call_details").update(update_data).eq("id", record_id).execute()
                 self.logger.info(f"Successfully updated call_details for id {record_id} with analysis.")
-            elif not record_id:
-                self.logger.error("Cannot update analysis results: record_id is not available")
-            elif not analysis_result:
-                self.logger.warning("No analysis results available to update record")
-            
-            # Trigger the action service to send notifications - do this regardless of analysis result
-            if record_id and self.call_sid:  # Only need call_sid and record_id to process notifications
+                
+                # Trigger the action service to send notifications
                 try:
                     from action_service import ActionService
                     action_service = ActionService(logger=self.logger)
@@ -1087,33 +1059,20 @@ class GeminiSession:
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
                                 
                                 # Create initial row in call_details table
-                                try:
-                                    # Use global supabase variable
-                                    if self.call_sid and supabase:
-                                        self.logger.info(f"Creating initial row in call_details for call_sid: {self.call_sid}")
+                                if self.call_sid:
+                                    try:
                                         initial_data = {
                                             "call_sid": self.call_sid,
                                             "session_id": self.session_id,
                                             "tenant": self.tenant,
                                             "from_number": self.from_number,
-                                            "to_number": self.to_number,
-                                            "created_at": datetime.now().isoformat()
+                                            "to_number": self.to_number
                                         }
-                                        # Add debug logging
-                                        self.logger.info(f"DEBUG: Supabase client type: {type(supabase)}")
-                                        self.logger.info(f"DEBUG: About to execute insert for call_sid: {self.call_sid}")
-                                        
-                                        # Use global supabase variable
                                         supabase.table("call_details").insert(initial_data).execute()
-                                        self.logger.info(f"Successfully created initial row in call_details for call_sid: {self.call_sid}")
-                                    else:
-                                        if not self.call_sid:
-                                            self.logger.error("Cannot create call_details row: call_sid is not available")
-                                        if not supabase:
-                                            self.logger.error("Cannot create call_details row: Global Supabase client is not available")
-                                except Exception as e:
-                                    self.logger.error(f"Error creating initial row in call_details: {str(e)}")
-                                    # Continue anyway - this is not critical for call flow
+                                        self.logger.info(f"Created initial call_details row for call_sid: {self.call_sid}")
+                                    except Exception as e:
+                                        self.logger.error(f"Error creating initial call_details row: {e}")
+                                        # Continue anyway - post-processing will handle it
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
