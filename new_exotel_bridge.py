@@ -1059,7 +1059,7 @@ class GeminiSession:
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
                                 
                                 # Create initial row in call_details table
-                                if self.call_sid:
+                                if self.call_sid and supabase:
                                     try:
                                         initial_data = {
                                             "call_sid": self.call_sid,
@@ -1073,6 +1073,8 @@ class GeminiSession:
                                     except Exception as e:
                                         self.logger.error(f"Error creating initial call_details row: {e}")
                                         # Continue anyway - post-processing will handle it
+                                elif not supabase:
+                                    self.logger.error("Supabase client not available for initial row creation")
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
