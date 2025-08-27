@@ -1059,57 +1059,42 @@ class GeminiSession:
                                 self.logger.info(f"Transcript manager initialized for call_id: {self.call_sid}")
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
                                 
-                                # Create initial call_details row asynchronously
-                                async def create_initial_call_details_row():
-                                    self.logger.info("🔍 STARTING create_initial_call_details_row function")
-                                    print("DEBUG: Starting create_initial_call_details_row function")
-                                    try:
-                                        # Get Supabase client
-                                        self.logger.info("🔍 Attempting to get Supabase client")
-                                        from supabase_client import get_supabase_client
-                                        supabase = get_supabase_client()
-                                        self.logger.info(f"🔍 Supabase client obtained: {supabase is not None}")
-                                        if supabase:
-                                            self.logger.info(f"Creating initial call_details row for call_sid: {self.call_sid}")
-                                            
-                                            # Prepare minimal initial data
-                                            initial_data = {
-                                                "call_sid": self.call_sid,
-                                                "session_id": self.session_id,
-                                                "tenant": self.tenant,
-                                                "from_number": self.from_number,
-                                                "to_number": self.to_number,
-                                                "created_at": datetime.now().isoformat()
-                                            }
-                                            
-                                            # Insert the initial row
-                                            response = supabase.table("call_details").insert(initial_data).execute()
-                                            
-                                            if hasattr(response, 'data') and response.data:
-                                                self.logger.info(f"Successfully created initial call_details row for call_sid: {self.call_sid}")
-                                            else:
-                                                self.logger.warning(f"Failed to create initial call_details row for call_sid: {self.call_sid}")
-                                    except Exception as e:
-                                        self.logger.error(f"Error creating initial call_details row: {str(e)}")
-
-                                # Create task to run asynchronously
-                                self.logger.info("🔍 About to create async task for initial call_details row")
-                                print("DEBUG: About to create async task for initial call_details row")
-                                task = asyncio.create_task(create_initial_call_details_row())
-                                self.logger.info(f"🔍 Async task created with ID: {id(task)}")
-                                print(f"DEBUG: Async task created with ID: {id(task)}")
-                                
-                                # Add done callback to log completion
-                                def log_task_done(future):
-                                    try:
-                                        result = future.result()
-                                        self.logger.info(f"🔍 Task {id(future)} completed successfully")
-                                        print(f"DEBUG: Task {id(future)} completed successfully")
-                                    except Exception as e:
-                                        self.logger.error(f"🔍 Task {id(future)} failed with error: {str(e)}")
-                                        print(f"DEBUG: Task {id(future)} failed with error: {str(e)}")
+                                # Create initial call_details row synchronously
+                                self.logger.info("🔍 STARTING create_initial_call_details_row function")
+                                print("DEBUG: Starting create_initial_call_details_row function")
+                                try:
+                                    # Get Supabase client
+                                    self.logger.info("🔍 Attempting to get Supabase client")
+                                    from supabase_client import get_supabase_client
+                                    supabase = get_supabase_client()
+                                    self.logger.info(f"🔍 Supabase client obtained: {supabase is not None}")
+                                    if supabase:
+                                        self.logger.info(f"Creating initial call_details row for call_sid: {self.call_sid}")
                                         
-                                task.add_done_callback(log_task_done)
+                                        # Prepare minimal initial data
+                                        initial_data = {
+                                            "call_sid": self.call_sid,
+                                            "session_id": self.session_id,
+                                            "tenant": self.tenant,
+                                            "from_number": self.from_number,
+                                            "to_number": self.to_number,
+                                            "created_at": datetime.now().isoformat()
+                                        }
+                                        
+                                        # Insert the initial row
+                                        response = supabase.table("call_details").insert(initial_data).execute()
+                                        
+                                        if hasattr(response, 'data') and response.data:
+                                            self.logger.info(f"Successfully created initial call_details row for call_sid: {self.call_sid}")
+                                        else:
+                                            self.logger.warning(f"Failed to create initial call_details row for call_sid: {self.call_sid}")
+                                except Exception as e:
+                                    self.logger.error(f"Error creating initial call_details row: {str(e)}")
+                                    import traceback
+                                    self.logger.error(f"Traceback: {traceback.format_exc()}")
+                                    print(f"ERROR creating initial call_details row: {str(e)}")
+                                    print(f"Traceback: {traceback.format_exc()}")
+
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
