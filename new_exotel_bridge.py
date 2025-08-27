@@ -179,9 +179,8 @@ class TranscriptManager:
             elif not analysis_result:
                 self.logger.warning("No analysis results available to update record")
             
-            # Trigger the action service to send notifications regardless of analysis result
-            # as long as we have a valid call_sid
-            if self.call_sid:
+            # Trigger the action service to send notifications - do this regardless of analysis result
+            if record_id and self.call_sid:  # Only need call_sid and record_id to process notifications
                 try:
                     from action_service import ActionService
                     action_service = ActionService(logger=self.logger)
@@ -193,15 +192,18 @@ class TranscriptManager:
                 except Exception as action_error:
                     self.logger.error(f"Error processing notifications: {action_error}")
                     # Continue with cleanup even if notifications fail
-            
-            # Save accumulated token data to database at the end
-            if self.token_accumulator:
-                try:
-                    await self.token_accumulator.save_to_database()
-                    self.logger.info(f"Successfully saved token usage data for call {self.call_sid}")
-                except Exception as token_error:
-                    self.logger.error(f"Error saving token data: {token_error}")
-                    # Continue with cleanup even if token save fails
+                
+                # Save accumulated token data to database at the end
+                if self.token_accumulator:
+                    try:
+                        await self.token_accumulator.save_to_database()
+                        self.logger.info(f"Successfully saved token usage data for call {self.call_sid}")
+                    except Exception as token_error:
+                        self.logger.error(f"Error saving token data: {token_error}")
+                        # Continue with cleanup even if token save fails
+            else:
+                self.logger.warning(f"Analysis returned no result for record {record_id}. No update performed.")
+
         except Exception as e:
             self.logger.error(f"An error occurred during transcript analysis or DB update: {e}")
             import traceback
