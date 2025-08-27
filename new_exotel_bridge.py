@@ -17,7 +17,7 @@ import warnings
 import sys
 import traceback
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any, Tuple, Union
 import httpx
 
 
@@ -104,22 +104,19 @@ class TranscriptManager:
 
         record_id = None
         try:
-            # Step 1: Insert the initial transcript data
-            # Note: We don't include an 'id' field - let Supabase auto-generate it
-            data_to_insert = {
-                "session_id": self.session_id,
-                "tenant": self.tenant,
-                "transcript": self.transcript_data,
-                "call_sid": self.call_sid
+            # Step 1: Update the existing transcript data
+            data_to_update = {
+                "transcript": self.transcript_data
             }
-            self.logger.info(f"Attempting to insert transcript for session {self.session_id} into 'call_details'.")
-            response = self.supabase_client.table("call_details").insert(data_to_insert).execute()
+            
+            self.logger.info(f"Updating transcript for session {self.session_id} in 'call_details'.")
+            response = self.supabase_client.table("call_details").update(data_to_update).eq("call_sid", self.call_sid).execute()
             
             if response.data:
                 record_id = response.data[0]['id']
-                self.logger.info(f"Successfully saved transcript to Supabase with record ID: {record_id}")
+                self.logger.info(f"Successfully updated transcript in Supabase with record ID: {record_id}")
             else:
-                self.logger.error("Failed to insert transcript into Supabase, no data returned.")
+                self.logger.error("Failed to update transcript in Supabase, no data returned.")
                 return
 
         except Exception as e:
@@ -1061,6 +1058,38 @@ class GeminiSession:
                                 )
                                 self.logger.info(f"Transcript manager initialized for call_id: {self.call_sid}")
                                 print(f"DEBUG: Transcript manager initialized for call_id: {self.call_sid}")
+                                
+                                # Create initial call_details row asynchronously
+                                async def create_initial_call_details_row():
+                                    try:
+                                        # Get Supabase client
+                                        from supabase_client import get_supabase_client
+                                        supabase = get_supabase_client()
+                                        if supabase:
+                                            self.logger.info(f"Creating initial call_details row for call_sid: {self.call_sid}")
+                                            
+                                            # Prepare minimal initial data
+                                            initial_data = {
+                                                "call_sid": self.call_sid,
+                                                "session_id": self.session_id,
+                                                "tenant": self.tenant,
+                                                "from_number": self.from_number,
+                                                "to_number": self.to_number,
+                                                "created_at": datetime.now().isoformat()
+                                            }
+                                            
+                                            # Insert the initial row
+                                            response = supabase.table("call_details").insert(initial_data).execute()
+                                            
+                                            if hasattr(response, 'data') and response.data:
+                                                self.logger.info(f"Successfully created initial call_details row for call_sid: {self.call_sid}")
+                                            else:
+                                                self.logger.warning(f"Failed to create initial call_details row for call_sid: {self.call_sid}")
+                                    except Exception as e:
+                                        self.logger.error(f"Error creating initial call_details row: {str(e)}")
+
+                                # Create task to run asynchronously
+                                asyncio.create_task(create_initial_call_details_row())
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
