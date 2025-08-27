@@ -865,8 +865,8 @@ class GeminiSession:
                     config=tenant_config
                 )
                 
-                # Initialize function handlers
-                self.function_handlers = FunctionHandlers()
+                # Initialize function handlers with reference to this GeminiSession
+                self.function_handlers = FunctionHandlers(session=self)
                 
                 self.logger.info(f"Gemini session initialized successfully for tenant '{self.tenant}'")
                 return
