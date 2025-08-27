@@ -940,9 +940,7 @@ class GeminiSession:
                             initial_data = {
                                 "call_sid": self.call_sid,
                                 "session_id": self.session_id,
-                                "tenant": self.tenant,
-                                "from_number": self.from_number,
-                                "to_number": self.to_number
+                                "tenant": self.tenant
                             }
                             supabase.table("call_details").insert(initial_data).execute()
                             self.logger.info(f"Created initial call_details row for call_sid: {self.call_sid}")
