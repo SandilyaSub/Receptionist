@@ -1061,10 +1061,14 @@ class GeminiSession:
                                 
                                 # Create initial call_details row asynchronously
                                 async def create_initial_call_details_row():
+                                    self.logger.info("🔍 STARTING create_initial_call_details_row function")
+                                    print("DEBUG: Starting create_initial_call_details_row function")
                                     try:
                                         # Get Supabase client
+                                        self.logger.info("🔍 Attempting to get Supabase client")
                                         from supabase_client import get_supabase_client
                                         supabase = get_supabase_client()
+                                        self.logger.info(f"🔍 Supabase client obtained: {supabase is not None}")
                                         if supabase:
                                             self.logger.info(f"Creating initial call_details row for call_sid: {self.call_sid}")
                                             
@@ -1089,7 +1093,23 @@ class GeminiSession:
                                         self.logger.error(f"Error creating initial call_details row: {str(e)}")
 
                                 # Create task to run asynchronously
-                                asyncio.create_task(create_initial_call_details_row())
+                                self.logger.info("🔍 About to create async task for initial call_details row")
+                                print("DEBUG: About to create async task for initial call_details row")
+                                task = asyncio.create_task(create_initial_call_details_row())
+                                self.logger.info(f"🔍 Async task created with ID: {id(task)}")
+                                print(f"DEBUG: Async task created with ID: {id(task)}")
+                                
+                                # Add done callback to log completion
+                                def log_task_done(future):
+                                    try:
+                                        result = future.result()
+                                        self.logger.info(f"🔍 Task {id(future)} completed successfully")
+                                        print(f"DEBUG: Task {id(future)} completed successfully")
+                                    except Exception as e:
+                                        self.logger.error(f"🔍 Task {id(future)} failed with error: {str(e)}")
+                                        print(f"DEBUG: Task {id(future)} failed with error: {str(e)}")
+                                        
+                                task.add_done_callback(log_task_done)
                                 
                                 # Verify call_details directory exists
                                 if os.path.exists(CALL_DETAILS_DIR):
