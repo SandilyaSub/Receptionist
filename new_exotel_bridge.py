@@ -567,6 +567,7 @@ class GeminiSession:
         self.shutdown_requested = False  # Flag to coordinate graceful shutdown across all tasks
         self.shutdown_reason = None      # Reason for shutdown (for logging/analytics)
         self.farewell_start_time = None  # Track when farewell delivery started
+        self.shutdown_event = asyncio.Event()  # Event for immediate shutdown notification
     
     def extract_total_conversation_tokens(self):
         """Extract and sum up all conversation tokens from the session.
@@ -1472,6 +1473,7 @@ class GeminiSession:
                                                 self.logger.info("Function handler requested call end")
                                                 self.shutdown_requested = True
                                                 self.shutdown_reason = "Function requested call end"
+                                                self.shutdown_event.set()  # Wake up sleeping tasks immediately
                                         else:
                                             self.logger.error(f"No handler found for function: {function_name}")
                                     except Exception as e:
@@ -1742,7 +1744,13 @@ class GeminiSession:
                     # This gives us better observability without being too aggressive
                 
                 # Wait before sending the next keep-alive
-                await asyncio.sleep(keep_alive_interval)
+                try:
+                    await asyncio.wait_for(self.shutdown_event.wait(), timeout=keep_alive_interval)
+                    # If we reach here, shutdown was requested - break immediately
+                    break
+                except asyncio.TimeoutError:
+                    # Normal timeout - continue with next keep-alive cycle
+                    pass
                 
         except asyncio.CancelledError:
             self.logger.info("Keep-alive task cancelled")
@@ -2086,7 +2094,7 @@ class GeminiSession:
         
         try:
             # Wait a bit for tasks to detect the flag and start their shutdown process
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(0.5)
             self.logger.info("✅ Coordination wait completed - other tasks should be shutting down")
             
         except Exception as e:
@@ -2111,9 +2119,9 @@ class GeminiSession:
                 )
                 self.logger.info("📤 Farewell instruction sent to Gemini")
             
-            # Step 2: Wait for farewell delivery (2.5s covers most messages)
-            self.logger.info("⏱️ Waiting 2.5s for farewell message delivery")
-            await asyncio.sleep(2.5)
+            # Step 2: Wait for farewell delivery (1.0s covers most messages)
+            self.logger.info("⏱️ Waiting 1.0s for farewell message delivery")
+            await asyncio.sleep(1.0)
             
             # Step 3: Close Gemini session
             if self.gemini_session:
