@@ -1941,8 +1941,18 @@ class GeminiSession:
         
         while True:
             try:
-                # Check every 5 seconds
-                await asyncio.sleep(5)
+                # Check every 5 seconds or immediately on shutdown
+                try:
+                    await asyncio.wait_for(self.shutdown_event.wait(), timeout=5.0)
+                    self.logger.info("🛑 Monitoring task received shutdown signal")
+                    break  # Exit monitoring loop immediately
+                except asyncio.TimeoutError:
+                    pass  # Continue monitoring - no shutdown signal yet
+                
+                # Early exit if shutdown already requested
+                if self.shutdown_requested:
+                    self.logger.info("🛑 Monitoring task detected shutdown flag")
+                    break
                 
                 # Check if WebSocket is closed (user disconnected)
                 websocket_open = True
