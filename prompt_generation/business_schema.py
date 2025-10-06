@@ -35,6 +35,16 @@ class LanguageCode(Enum):
     PUNJABI = "pa"
 
 @dataclass
+class ServiceProviderInfo:
+    """Information about a service provider (doctor, stylist, consultant, etc.)."""
+    name: str
+    role: str  # e.g., "Pediatrician", "Senior Stylist", "Consultant", "Therapist"
+    email: str  # Calendar email for booking
+    qualifications: Optional[str] = None
+    experience: Optional[str] = None
+    registration: Optional[str] = None
+
+@dataclass
 class BusinessData:
     """Complete business information for prompt generation."""
     
@@ -70,6 +80,10 @@ class BusinessData:
     payment_methods: Optional[List[str]] = None
     delivery_available: bool = False
     
+    # Calendar & Appointments
+    service_providers: Optional[List[ServiceProviderInfo]] = None
+    appointment_duration: int = 30  # minutes
+    
     # Custom Fields (from onboarding form)
     custom_fields: Optional[Dict[str, Any]] = None
 
@@ -82,6 +96,7 @@ class GeneratedPrompt:
     generation_timestamp: str
     quality_score: Optional[float] = None
     validation_notes: Optional[List[str]] = None
+    metadata: Optional[dict] = None
     
     def save_to_file(self, filepath: str) -> None:
         """Save the generated prompt to a file."""

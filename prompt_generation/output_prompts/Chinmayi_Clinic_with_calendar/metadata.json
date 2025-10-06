@@ -1,0 +1,12 @@
+{
+  "tenant_id": "Chinmayi_Clinic_with_calendar",
+  "business_name": "Chinmayi Clinic",
+  "generation_timestamp": "2025-09-04T12:42:29.052223",
+  "quality_score": 0.6,
+  "validation_notes": [
+    "Generated from template (fallback - LLM not available or failed)"
+  ],
+  "business_type": "other",
+  "location": "209, Prem Vatsav Arcade, First Floor, Palm Ave, Green Glen Layout, Bellandur, Bengaluru, Karnataka 560103",
+  "last_evaluation": "2025-09-05T17:34:59.358620"
+}

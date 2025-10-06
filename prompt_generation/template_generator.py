@@ -13,11 +13,17 @@ class PromptTemplateGenerator:
     
     def __init__(self):
         self.common_behavioral_framework = self._load_common_behaviors()
+        self.raw_input_text = ""
+    
+    def _set_raw_input_text(self, text: str):
+        """Set the raw input text for CSV preservation."""
+        self.raw_input_text = text
     
     def _load_common_behaviors(self) -> Dict[str, str]:
         """Define common behavioral instructions for all agents."""
         return {
             "core_identity": """* You are Aarohi, a warm and professional receptionist for {business_name} in {location}
+* Your PRIMARY role is to help patients book appointments AND transfer calls for emergencies/escalations
 * Speak with a natural Indian English accent and tone
 * Be extremely courteous, friendly, and enthusiastic in all interactions
 * Use warm greetings like "Namaste" or "Hello" and polite expressions throughout conversations
@@ -31,7 +37,8 @@ class PromptTemplateGenerator:
 * Match their level of formality and cultural expressions
 * Use appropriate honorifics (ji, sahib, madam, sir)""",
             
-            "operational_boundaries": """OPERATIONAL BOUNDARIES:
+            "operational_boundaries": """OPERATIONAL BOUNDARIES & PRIORITY HIERARCHY:
+* PRIORITY ORDER: 1) Medical Emergencies (immediate transfer) 2) Appointment Management 3) Other Handover Calls
 * You can ONLY discuss services and information related to {business_name}
 * You cannot process payments, confirm bookings, or access internal systems
 * For any questions outside {business_type} services, respond: "Sorry, I do not have information about this at the moment"
@@ -51,11 +58,24 @@ class PromptTemplateGenerator:
 4. Any special requirements or preferences
 5. Contact preferences for follow-up""",
             
-            "handoff_process": """PROCESS COMPLETION:
+            "handoff_process": """HANDOVER & ESCALATION FUNCTIONS:
+* You MUST use the handover_transfer_call function for ALL escalations and transfers
+* Don't wait or ask for additional details. Transfer immediately when escalation is needed
+* Never simulate or assume a transfer without calling the handover_transfer_call function
+* If function fails, apologize and advise customer to call hospital directly
+
+ESCALATION TRIGGERS - Invoke handover_transfer_call immediately:
+* Medical emergencies or urgent health concerns
+* Insurance-related complex queries  
+* Administrative issues beyond basic information
+* Customer complaints requiring management attention
+* Requests for lab reports or medical records
+* Ambulance service requests
+
+PROCESS COMPLETION (Non-escalation cases):
 * After gathering all customer details thoroughly
 * Confirm all information with the customer
-* Inform: "Thank you for choosing {business_name}! Someone from our team will reach out to you shortly with further details. You'll also receive a message with our contact information for any clarifications."
-* For urgent matters, emphasize: "For immediate assistance, please call our main number: {phone_number}""",
+* Inform: "Thank you for choosing {business_name}! Someone from our team will reach out to you shortly with further details." """,
             
             "limitations": """IMPORTANT LIMITATIONS:
 * You cannot access existing customer data or booking systems
@@ -65,8 +85,17 @@ class PromptTemplateGenerator:
 * Stay within the scope of {business_type} services only"""
         }
     
-    def generate_base_template(self, business_data: BusinessData) -> str:
+    def generate_base_template(self, business_data: BusinessData, include_calendar: bool = False) -> str:
         """Generate a structured base template from business data."""
+        
+        # Add calendar functionality if requested
+        calendar_section = ""
+        if include_calendar:
+            try:
+                from calendar_functions_loader import get_generic_calendar_instructions
+                calendar_section = f"\n\n{get_generic_calendar_instructions()}"
+            except ImportError:
+                print("Warning: Could not load calendar instructions for template")
         
         # Prepare template variables
         template_vars = {
@@ -77,7 +106,8 @@ class PromptTemplateGenerator:
             "phone_number": business_data.phone_number,
             "regional_languages": ", ".join([lang.value.title() for lang in business_data.supported_languages if lang != LanguageCode.ENGLISH]),
             "services_list": self._format_services_list(business_data.services),
-            "greeting_message": self._generate_greeting(business_data)
+            "greeting_message": self._generate_greeting(business_data),
+            "raw_input_text": ""  # Will be populated when available
         }
         
         # Build the template sections
@@ -93,8 +123,8 @@ class PromptTemplateGenerator:
         # Operational Boundaries
         sections.append(self.common_behavioral_framework["operational_boundaries"].format(**template_vars))
         
-        # Business-Specific Knowledge
-        sections.append(self._generate_business_knowledge_section(business_data))
+        # Business-Specific Knowledge (with CSV preservation)
+        sections.append(self._generate_business_knowledge_section(business_data, self.raw_input_text))
         
         # Timezone Requirements
         sections.append(self.common_behavioral_framework["timezone_requirements"].format(**template_vars))
@@ -110,6 +140,10 @@ class PromptTemplateGenerator:
         
         # Limitations
         sections.append(self.common_behavioral_framework["limitations"].format(**template_vars))
+        
+        # Add calendar section if requested
+        if calendar_section:
+            sections.append(calendar_section)
         
         # Sample Interaction
         sections.append(f'SAMPLE INTERACTION FLOW: "{template_vars["greeting_message"]}"')
@@ -148,10 +182,18 @@ class PromptTemplateGenerator:
             f"Namaste! Welcome to {business_data.business_name}. I'm Aarohi. How may I help you today?"
         )
     
-    def _generate_business_knowledge_section(self, business_data: BusinessData) -> str:
-        """Generate business-specific knowledge section."""
+    def _generate_business_knowledge_section(self, business_data: BusinessData, raw_input_text: str = "") -> str:
+        """Generate business-specific knowledge section with CSV preservation."""
         knowledge_section = f"SERVICES KNOWLEDGE: You have access to information about {business_data.business_name}'s services:\n"
         knowledge_section += self._format_services_list(business_data.services)
+        
+        # Check for CSV format in raw input and preserve it
+        if raw_input_text:
+            # Look for specialist/doctor CSV data
+            from csv_extractor import extract_csv_sections
+            csv_sections = extract_csv_sections(raw_input_text)
+            if csv_sections:
+                knowledge_section += "\n\n" + csv_sections
         
         if business_data.business_description:
             knowledge_section += f"\n\nBUSINESS OVERVIEW:\n{business_data.business_description}"

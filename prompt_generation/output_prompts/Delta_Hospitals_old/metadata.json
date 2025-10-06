@@ -1,0 +1,76 @@
+{
+  "tenant_id": "Delta_Hospitals",
+  "generation_timestamp": "2025-09-04T22:44:31.216080",
+  "models": {
+    "claude": {
+      "filename": "assistant_claude.txt",
+      "business_name": "Unknown",
+      "generation_timestamp": "2025-09-04T22:44:31.214674",
+      "quality_score": 0.7999999999999999,
+      "validation_notes": [
+        "Generated using data-first approach with Claude"
+      ],
+      "model_metadata": {}
+    }
+  },
+  "claude": {
+    "quality_score": 0.6615384615384615,
+    "scoring_breakdown": {
+      "structured_sections": {
+        "score": 3.0,
+        "max_score": 3.0,
+        "found_sections": 5,
+        "total_sections": 5,
+        "details": "Found 5/5 required sections"
+      },
+      "tool_optimization": {
+        "score": 0.0,
+        "max_score": 2.0,
+        "applicable": false,
+        "details": "Tool indicators found: N/A (no appointments)"
+      },
+      "conversation_flow": {
+        "score": 1.6,
+        "max_score": 2.0,
+        "found_phases": 4,
+        "total_phases": 5,
+        "details": "Found 4/5 conversation phases"
+      },
+      "bullet_points": {
+        "score": 1.0,
+        "max_score": 1.0,
+        "bullet_count": 95,
+        "details": "Found 95 bullet points (good if >10)"
+      },
+      "cultural_elements": {
+        "score": 1.0,
+        "max_score": 1.0,
+        "found_elements": 5,
+        "total_elements": 5,
+        "details": "Found 5/5 cultural elements"
+      },
+      "business_data_inclusion": {
+        "score": 0.0,
+        "max_score": 1.0,
+        "details": "No pricing data or not preserved"
+      },
+      "sample_phrases": {
+        "score": 1.0,
+        "max_score": 1.0,
+        "details": "Contains sample phrases or preambles"
+      },
+      "variety_rules": {
+        "score": 1.0,
+        "max_score": 1.0,
+        "details": "Contains variety/anti-repetition rules"
+      },
+      "character_score": {
+        "score": 0.0,
+        "max_score": 1.0,
+        "details": "Character score: 0.0/1.0"
+      }
+    },
+    "last_evaluated": "2025-09-05T17:34:59.364335"
+  },
+  "last_evaluation": "2025-09-05T17:34:59.364350"
+}

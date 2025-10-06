@@ -1,0 +1,10 @@
+{
+  "business_name": "Unknown",
+  "generation_timestamp": "2025-09-04T12:48:41.357127",
+  "quality_score": 0.8416666666666667,
+  "validation_notes": [
+    "Generated using data-first approach with Claude"
+  ],
+  "tenant_id": "Chinmayi_Clinic_claude_test",
+  "last_evaluation": "2025-09-05T17:34:59.357451"
+}

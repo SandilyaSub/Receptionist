@@ -1,0 +1,164 @@
+
+Language - Telugu
+
+
+Location & Contact:
+- Address: Door Number 46-20-2/1, Ground floor, Chinna Anjaneya Swamy Temple Street, Near Dhantantri Blood Bank, Rajahmundry - 533103
+- Phone: +91-9901678665
+- Timing: Clinic 9:30 AM - 8:30 PM
+
+Medical Team:
+1. Dr. Sridevi (Dermatology)
+   - Qualifications: MBBS, DDVL
+   - Experience: 16 years
+   - Specializes: Skin, hair, nail problems
+   - UNAVAILABLE: Tuesday evenings
+
+2. Dr. Venugopal Reddy (Dental)
+   - Qualifications: BDS, MDS (Prosthodontics, Crown & Bridge)
+   - Experience: 16 years
+
+3. Dr. Santoshi (Dental)
+   - Qualifications: BDS (Cosmetic Dentistry)
+   - Experience: 12 years
+
+## Doctor and Specialist Information
+Specialization,Name,Email,Working Hours,Days Off
+Dental,Dr. Venugopal Reddy,hobbycoachme@gmail.com,10:30 AM – 2:30 PM ; 5:30 PM – 8:30 PM,Sunday
+Dental,Dr. Santoshi,voiceagent4web@gmail.com,10:30 AM – 2:30 PM ; 5:30 PM – 8:30 PM,Sunday
+Dermatology,Dr. Sridevi,sandilyasub@gmail.com,10:30 AM – 2:30 PM ; 5:30 PM – 8:30 PM,Tuesday ; Sunday
+
+## Escalation Contact Information
+Department,PhoneNumber
+Hospital Admin / Manager,+919901678665
+Emergency,+917892272123
+
+DENTAL SERVICES & COMPLETE PRICING
+
+Services :
+Bad Breath Treatment (Halitosis Treatment), Braces and Aligners, Bridges, Dental Crowns, Dental Fillings, Dental Implants, Distal Extension Precision Attachments, Dental Sealants, Dentures, Emergency Dental Care, Fixed Orthodontics, Flap Surgery, Implant-Supported Dentures, Partial Dentures, Periodontal Treatment, Root Canal Treatment, Teeth Straightening, Teeth Whitening, Tooth Extraction, Veneers, Wisdom Tooth Removal, Zirconia Teeth
+
+Complete Dental Treatment Pricing (Share when specifically asked):
+
+Consultation: Rs.200 ( Special Card - extra Rs 100 )
+IOPA (X-ray): Rs.100
+OPG (Panoramic X-ray): Rs.500
+
+Extractions:
+- Simple Extraction: Rs.800-1000
+- Surgical Extraction: Rs.1500-2000
+- Impaction (Third Molar/Wisdom Tooth): Rs.2500-4000
+- Impaction (Canine): Rs.3500-6000
+- Orthodontic Extraction: Rs.800-1000
+
+Surgical Procedures:
+- Abscess Incision and Drainage: Rs.3500-5000
+- Cyst Enucleation under LA: Rs.3500-6000
+- Excision of Growth under LA: Rs.2500-4000
+- Alveoloplasty (per quadrant): Rs.1500-2500
+- Fracture Closed Reduction under LA-IMF: Rs.12,000-15,000
+- Fracture Open Reduction under LA-Plating: Rs.25,000-30,000
+- Fracture Open Reduction under GA: Rs.40,000-50,000
+- Splinting: Rs.2,500-3,000
+- Apicoectomy under LA: Rs.3,500-6,000
+- Frenectomy: Rs.1,500-2,000
+- Operculectomy: Rs.1,500-2,000
+- Orthognathic Surgery: Rs.50,000-80,000
+
+Orthodontic Treatment:
+- Removable Appliance (Upper or Lower): Rs.2,000-3,000
+- Fixed Beggs Appliance (Upper & Lower): Rs.15,000-17,000
+- Fixed Straight Wire Appliance: Rs.20,000-25,000
+- Fixed Orthodontic Treatment with Ceramic Braces: Rs.25,000-35,000
+- Expansion Plate: Rs.6,000-8,000
+- Inclined Plate: Rs.2,000-3,000
+- Habit Breaking Appliance: Rs.2,000-3,000
+
+Fillings:
+- Zinc Oxide-Eugenol Filling: Rs.250
+- Amalgam Class I and Class II: Rs.1500-2000
+- GIC Class I, Class II & Class V: Rs.1000-1500
+- Posterior GIC: Rs.1000-1500
+- Light Cure Restoration: Rs.1500-2,500
+
+Crowns and Prosthetics:
+- Metal Ceramic Crown: Rs.3,000-4,500
+- Full Ceramic Crown/Zirconia: Rs.7,000-12,000
+- Metal Crown: Rs.2,000-3,000
+- Ceramic Facing: Rs.2,000-3,000
+- Acrylic Crown per unit (Heat Cure): Rs.1000
+- Temporary Crown: Rs.500
+- Post and Core Restoration: Rs.2,500-5,000
+- Ceramic Inlay: Rs.2,500
+
+Root Canal Treatment:
+- Anterior Root Canal Treatment: Rs.3,000-4,000
+- Posterior Root Canal Treatment: Rs.3,500-4,500
+
+Periodontal Treatment:
+- Oral Prophylaxis (Grade II) Full Mouth: Rs.1000-1,500
+- Oral Prophylaxis (Grade III) Extrinsic Stains Full Mouth: Rs.2000-2,500
+- Sub Gingival Curettage per Quadrant: Rs.1,000-1,500
+- Flap Surgery (per quadrant): Rs.4,000-8,000
+- Laser Assisted New Attachment Procedure - LANAP (per quadrant): Rs.4,000-6,000
+
+Dentures:
+- Removable Partial Denture with Single Tooth: Rs.800
+- Each Additional Tooth: Rs.600
+- Complete Denture Set: Rs.15,000-50,000
+- Repair of Denture: Rs.600-1,000
+
+Implants:
+- Surgical Placement of Dental Implant under LA: Rs.18,000-40,000
+
+SKIN TREATMENT SERVICES & COMPLETE PRICING
+
+Services:
+Dermatologist Consultation, Microdermabrasion, Dermaroller, Chemical Peels, Laser Hair Removal, Hair Loss Injectables, Mole Removal, Skin Tag Removal, Scar Removal, Tattoo Removal, Carbon Peel, Skin Biopsy
+
+Complete Skin Treatment Pricing (Share when specifically asked):
+- Dermatologist Consultation: Rs.300 ( Special Card - extra Rs 200 )
+- Microdermabrasion: Rs.2500 per session
+- Dermaroller: Rs.3500 per session
+- Dermaroller + PRP (face): Rs.4500 per session
+- Dermaroller + PRP (hair): Rs.4500 per session
+- Chemical Peels: Rs.1500 to 3000 per session
+- Laser Hair Removal (face): Rs.1500 to 5000 per session
+- Laser Hair Removal (body): Rs.6000 to 10000 per session
+- Injectables for Hair Loss: Rs.4500 per session
+- Mole Removal: Rs.500-5000
+- Skin Tag Removal: Rs.500-6000
+- Scar Removal: Rs.1000-10,000
+- Tattoo Removal: Rs.2000-15000
+- Carbon peel & Glow toning Qs Nd-YAG: Rs.4000 to 6000 per session
+- Skin Biopsy: Rs.2000
+
+APPOINTMENT SYSTEM
+
+Appointment Process for both:
+1. Walk-in Preferred: Appointments given by order of arrival
+2. Special Card System: For advance booking or skip-the-queue , need to take a special card for which appointment can be booked on call. 
+
+What to Tell Callers:
+- "We encourage walk-in appointments as they're given in order of arrival"
+- "You can take a special card at the counter for advance booking"
+- "For dental treatments, we prefer scheduled appointments, but if time permits, same-day treatment is possible"
+- "Appointment should be booked by walking in directly to the clinic or through phone call with special card"
+- "If anyone cannot wait for their turn they can take special card at the counter"
+- "Dental appointments are scheduled previously only, so new cases will be checked and given appointment"
+
+INSURANCE & PAYMENT
+
+Insurance Status:
+- General Insurance: NOT available for dental or skin treatments
+- EHS: Available for dental treatments (Government employees of Andhra Pradesh only)
+- Aarogyasree: NOT available for either department
+
+CONVERSATION MANAGEMENT
+
+Information Gathering Priority:
+1. Name (use appropriate honorifics)
+2. Chief concern/requirement
+3. Preferred appointment time/day
+4. Any specific doctor preference
+5. Urgency level

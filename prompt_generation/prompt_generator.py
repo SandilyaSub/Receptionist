@@ -9,16 +9,17 @@ import os
 import json
 import argparse
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 import dotenv
 
 dotenv.load_dotenv()
 
-from business_schema import BusinessData, GeneratedPrompt, EXAMPLE_BUSINESS_DATA
+from business_schema import BusinessData, GeneratedPrompt, ServiceProviderInfo, EXAMPLE_BUSINESS_DATA
 from template_generator import PromptTemplateGenerator
 from llm_refiner import ClaudePromptRefiner
+from gemini_refiner import GeminiPromptRefiner
 
 class PromptGenerator:
     """Main interface for automated prompt generation."""
@@ -29,49 +30,82 @@ class PromptGenerator:
         
         # Initialize Claude refiner if API key is available
         self.claude_refiner = None
+        
+        # Initialize Gemini refiner if API key is available
+        self.gemini_refiner = None
         try:
             self.claude_refiner = ClaudePromptRefiner(os.getenv("ANTHROPIC_API_KEY"))
         except ValueError as e:
             print(f"Warning: Claude refiner not available - {e}")
             print("Will use template-only generation")
+        
+        try:
+            self.gemini_refiner = GeminiPromptRefiner()
+        except ValueError as e:
+            print(f"Warning: Gemini refiner not available - {e}")
+            print("Will use Claude-only generation")
     
-    def generate_agent_prompt(self, business_data: BusinessData, business_input_text: str = None, use_llm_refinement: bool = True) -> GeneratedPrompt:
+    def generate_agent_prompt(self, business_data: BusinessData, business_input_text: str, use_llm_refinement: bool = True, include_calendar: bool = False, model: str = None) -> Dict[str, GeneratedPrompt]:
         """
-        Generate a complete AI agent prompt for the given business using data-first approach.
+        Generate an AI agent prompt using agentic approach with multiple LLMs.
         
         Args:
-            business_data: Business information from onboarding
-            business_input_text: Raw business input text from file
-            use_llm_refinement: Whether to use Claude for generation (default: True)
+            business_data: Structured business information
+            business_input_text: Raw input text for data-first approach
+            use_llm_refinement: Whether to use LLM refinement (default: True)
+            include_calendar: Whether to include calendar functionality (default: False)
+            model: Specific model to use ('claude' or 'gemini'). If None, uses both models.
             
         Returns:
-            GeneratedPrompt object with the final prompt and metadata
+            Dict[str, GeneratedPrompt]: Dictionary with model names as keys and GeneratedPrompt objects as values
         """
+        results = {}
         
-        # Use data-first approach if LLM is available and requested
-        if use_llm_refinement and self.claude_refiner and business_input_text:
-            print("Generating prompt with Claude 4 Sonnet (data-first approach)...")
-            try:
-                generated_prompt = self.claude_refiner.generate_prompt_data_first(business_input_text, business_data)
-                print("✅ Data-first prompt generation completed successfully")
-                return generated_prompt
-            except Exception as e:
-                print(f"⚠️ LLM generation failed: {e}")
-                print("Falling back to template generation")
+        if use_llm_refinement:
+            # Generate prompts from specified model(s)
+            # Generate with Claude (if requested or no specific model)
+            if (model is None or model == 'claude') and self.claude_refiner:
+                try:
+                    print("🤖 Generating with Claude...")
+                    claude_prompt = self.claude_refiner.refine_prompt_data_first(business_input_text, include_calendar)
+                    results['claude'] = claude_prompt
+                except Exception as e:
+                    print(f"❌ Claude generation failed: {e}")
+            
+            # Generate with Gemini (if requested or no specific model)
+            if (model is None or model == 'gemini') and self.gemini_refiner:
+                try:
+                    print("🧠 Generating with Gemini...")
+                    gemini_prompt = self.gemini_refiner.refine_prompt(business_input_text, include_calendar)
+                    results['gemini'] = gemini_prompt
+                except Exception as e:
+                    print(f"❌ Gemini generation failed: {e}")
+                    results['gemini'] = None
+            
+            # If both failed, fallback to template
+            if not results.get('claude') and not results.get('gemini'):
+                print("⚠️ Both LLM generations failed, falling back to template")
+                template_content = self.template_generator.generate_base_template(business_data, include_calendar)
+                fallback_prompt = GeneratedPrompt(
+                    prompt_text=template_content,
+                    business_data=business_data,
+                    generation_timestamp=datetime.now().isoformat(),
+                    quality_score=0.6,
+                    validation_notes=["Generated from template (fallback - LLM not available or failed)"]
+                )
+                results['template'] = fallback_prompt
+        else:
+            # Template-only generation
+            template_content = self.template_generator.generate_base_template(business_data, include_calendar)
+            results['template'] = GeneratedPrompt(
+                prompt_text=template_content,
+                business_data=business_data,
+                generation_timestamp=datetime.now().isoformat(),
+                quality_score=0.7,
+                validation_notes=["Generated from template only"]
+            )
         
-        # Fallback: Generate base template (legacy approach)
-        print(f"Generating base template for {business_data.business_name}...")
-        base_template = self.template_generator.generate_base_template(business_data)
-        
-        fallback_prompt = GeneratedPrompt(
-            prompt_text=base_template,
-            business_data=business_data,
-            generation_timestamp=datetime.now().isoformat(),
-            quality_score=0.6,  # Lower score for template fallback
-            validation_notes=["Generated from template (fallback - LLM not available or failed)"]
-        )
-        
-        return fallback_prompt
+        return results
     
     def generate_from_onboarding_data(self, onboarding_json: Dict[str, Any]) -> GeneratedPrompt:
         """
@@ -152,6 +186,11 @@ class PromptGenerator:
         if isinstance(services, str):
             services = [services]
         
+        # Parse service providers
+        service_providers = onboarding_json.get("service_providers", [])
+        if not isinstance(service_providers, list):
+            service_providers = []
+        
         # Create BusinessData object
         business_data = BusinessData(
             business_name=business_name,
@@ -172,21 +211,23 @@ class PromptGenerator:
             online_booking_available=onboarding_json.get("online_booking_available", False),
             payment_methods=onboarding_json.get("payment_methods"),
             delivery_available=onboarding_json.get("delivery_available", False),
+            service_providers=service_providers,
+            appointment_duration=onboarding_json.get("appointment_duration", 30),
             custom_fields=onboarding_json.get("custom_fields")
         )
         
         return business_data
     
-    def save_prompt_to_output_directory(self, generated_prompt: GeneratedPrompt, tenant_id: str) -> str:
+    def save_prompts_to_output_directory(self, generated_prompts: Dict[str, GeneratedPrompt], tenant_id: str) -> str:
         """
-        Save the generated prompt to the output directory (not production).
+        Save the generated prompts (agentic approach) to the output directory structure.
         
         Args:
-            generated_prompt: The generated prompt object
-            tenant_id: Unique identifier for the tenant
+            generated_prompts: Dictionary of generated prompt objects (claude, gemini, template)
+            tenant_id: Tenant identifier for directory naming
             
         Returns:
-            Path where the prompt was saved
+            Path to the output directory
         """
         
         # Create output directory structure
@@ -195,30 +236,50 @@ class PromptGenerator:
         
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save the prompt
-        prompt_path = f"{output_dir}/assistant.txt"
-        generated_prompt.save_to_file(prompt_path)
-        
-        # Save metadata
-        metadata = {
+        # Save each generated prompt with appropriate filename
+        saved_files = []
+        combined_metadata = {
             "tenant_id": tenant_id,
-            "business_name": generated_prompt.business_data.business_name,
-            "generation_timestamp": generated_prompt.generation_timestamp,
-            "quality_score": generated_prompt.quality_score,
-            "validation_notes": generated_prompt.validation_notes,
-            "business_type": generated_prompt.business_data.business_type.value,
-            "location": generated_prompt.business_data.location
+            "generation_timestamp": datetime.now().isoformat(),
+            "models": {}
         }
         
+        for model_name, prompt in generated_prompts.items():
+            if prompt is not None:
+                # Save prompt file
+                if model_name == 'claude':
+                    filename = "assistant_claude.txt"
+                elif model_name == 'gemini':
+                    filename = "assistant_gemini.txt"
+                else:
+                    filename = f"assistant_{model_name}.txt"
+                
+                prompt_path = f"{output_dir}/{filename}"
+                prompt.save_to_file(prompt_path)
+                saved_files.append(prompt_path)
+                
+                # Add to combined metadata
+                combined_metadata[model_name] = {
+                    "filename": filename,
+                    "business_name": prompt.business_data.business_name if prompt.business_data else "Unknown",
+                    "generation_timestamp": prompt.generation_timestamp,
+                    "quality_score": prompt.quality_score,
+                    "validation_notes": prompt.validation_notes,
+                    "model_metadata": getattr(prompt, 'metadata', {}),
+                    "scoring_breakdown": getattr(prompt, 'metadata', {}).get('scoring_breakdown', {}) if hasattr(prompt, 'metadata') and prompt.metadata else {}
+                }
+                
+                print(f"✅ {model_name.title()} prompt saved to: {prompt_path}")
+        
+        # Save combined metadata
         metadata_path = f"{output_dir}/metadata.json"
         with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
+            json.dump(combined_metadata, f, indent=2, ensure_ascii=False)
         
-        print(f"✅ Generated prompt saved to: {prompt_path}")
-        print(f"✅ Metadata saved to: {metadata_path}")
-        print(f"📋 Review the prompt and manually copy to production when ready")
+        print(f"✅ Combined metadata saved to: {metadata_path}")
+        print(f"📋 Review the generated prompts and copy to production when ready")
         
-        return prompt_path
+        return output_dir
     
     def load_business_data_from_file(self, input_file_path: str) -> BusinessData:
         """
@@ -236,6 +297,11 @@ class PromptGenerator:
         special_instructions: Always ask about dental history
         appointment_required: true
         
+        Service Provider format:
+        - Available Staff/Service Providers:
+        * Name - Role/Specialization
+        Email for calendar appointment bookings - provider@email.com
+        
         Args:
             input_file_path: Path to the input text file
             
@@ -246,17 +312,105 @@ class PromptGenerator:
         if not os.path.exists(input_file_path):
             raise FileNotFoundError(f"Input file not found: {input_file_path}")
         
-        # Read and parse the input file
-        business_info = {}
+        # Read the entire file content for doctor parsing
         with open(input_file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and ':' in line:
-                    key, value = line.split(':', 1)
-                    business_info[key.strip().lower()] = value.strip()
+            file_content = f.read()
+        
+        # Parse basic business info
+        business_info = {}
+        lines = file_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if line and ':' in line and not line.startswith('*') and not line.startswith('-'):
+                key, value = line.split(':', 1)
+                business_info[key.strip().lower()] = value.strip()
+        
+        # Parse service provider information
+        service_providers = self._parse_service_providers_from_content(file_content)
+        business_info['service_providers'] = service_providers
         
         # Convert to BusinessData using the existing parsing logic
         return self._parse_onboarding_data(business_info)
+    
+    def _parse_service_providers_from_content(self, file_content: str) -> List[ServiceProviderInfo]:
+        """
+        Parse service provider information from file content.
+        
+        Expected format:
+        - Available Staff/Service Providers:
+        * Name - Role/Specialization
+        Email for calendar appointment bookings - provider@email.com
+        
+        Args:
+            file_content: Full content of the input file
+            
+        Returns:
+            List of ServiceProviderInfo objects
+        """
+        service_providers = []
+        lines = file_content.split('\n')
+        
+        current_provider = None
+        current_email = None
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            
+            # Look for provider entries starting with * (flexible matching)
+            if line.startswith('*') and any(keyword in line.lower() for keyword in ['dr.', 'mr.', 'ms.', 'mrs.', 'stylist', 'consultant', 'therapist']) or (line.startswith('*') and ' - ' in line):
+                # Parse provider name and role
+                provider_line = line[1:].strip()  # Remove the *
+                if ' - ' in provider_line:
+                    name_part, role = provider_line.split(' - ', 1)
+                    name = name_part.strip()
+                    role = role.strip()
+                else:
+                    name = provider_line.strip()
+                    role = "Service Provider"
+                
+                current_provider = {
+                    'name': name,
+                    'role': role
+                }
+            
+            # Look for email on the next line
+            elif line.startswith('Email for calendar') and current_provider:
+                if ' - ' in line:
+                    email = line.split(' - ', 1)[1].strip()
+                    current_email = email
+                    
+                    # Create ServiceProviderInfo object
+                    provider_info = ServiceProviderInfo(
+                        name=current_provider['name'],
+                        role=current_provider['role'],
+                        email=current_email
+                    )
+                    
+                    # Parse additional info if available in subsequent lines
+                    j = i + 1
+                    while j < len(lines) and lines[j].strip():
+                        next_line = lines[j].strip()
+                        if any(qual in next_line for qual in ['MBBS', 'Diploma', 'Certificate', 'Degree', 'Certified']):
+                            if not provider_info.qualifications:
+                                provider_info.qualifications = next_line
+                            else:
+                                provider_info.qualifications += f", {next_line}"
+                        elif 'Experience' in next_line or any(year in next_line for year in ['2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']):
+                            if not provider_info.experience:
+                                provider_info.experience = next_line
+                            else:
+                                provider_info.experience += f", {next_line}"
+                        elif 'Registration' in next_line or any(char.isdigit() for char in next_line):
+                            if not provider_info.registration:
+                                provider_info.registration = next_line
+                        j += 1
+                    
+                    service_providers.append(provider_info)
+                    current_provider = None
+                    current_email = None
+        
+        return service_providers
 
 # Example usage and testing
 def test_prompt_generation():
@@ -317,36 +471,21 @@ def main():
     """Main CLI function for prompt generation."""
     parser = argparse.ArgumentParser(
         description='Generate AI agent prompts from business onboarding data',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Examples:
-  python3 prompt_generator.py --input business_data.txt --tenant sreedevi_dental_rjy
-  python3 prompt_generator.py --test  # Run with example data
-        """
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument(
-        '--input', '-i',
-        type=str,
-        help='Path to input text file containing business onboarding data'
-    )
-    
-    parser.add_argument(
-        '--tenant', '-t',
-        type=str,
-        help='Tenant ID for the business (used for output directory name)'
-    )
-    
-    parser.add_argument(
-        '--test',
-        action='store_true',
-        help='Run with example data (ignores --input and --tenant)'
-    )
-    
-    parser.add_argument(
-        '--no-llm',
-        action='store_true',
-        help='Skip LLM refinement, use template only'
-    )
+    parser.add_argument('--input', required=True, help='Input file containing business data')
+    parser.add_argument('--tenant', required=True, help='Tenant name for output directory')
+    parser.add_argument('--approach', choices=['template', 'llm', 'data-first'], 
+                       default='data-first', help='Approach to use for prompt generation')
+    parser.add_argument('--calendar', action='store_true', 
+                       help='Include calendar booking functionality in the generated prompt')
+    parser.add_argument('--test', action='store_true',
+                       help='Run with example data (ignores --input and --tenant)')
+    parser.add_argument('--no-llm', action='store_true',
+                       help='Skip LLM refinement, use template only')
+    parser.add_argument('--model', choices=['claude', 'gemini'], 
+                       help='Specific model to use for generation (claude or gemini). If not specified, both models will be used.')
     
     args = parser.parse_args()
     
@@ -379,20 +518,24 @@ def main():
         with open(args.input, 'r', encoding='utf-8') as f:
             business_input_text = f.read()
         
+        # Pass raw input text to template generator for CSV preservation
+        if hasattr(generator.template_generator, '_set_raw_input_text'):
+            generator.template_generator._set_raw_input_text(business_input_text)
+        
         print(f"✅ Loaded data for: {business_data.business_name}")
         print(f"   Business Type: {business_data.business_type.value}")
         print(f"   Location: {business_data.location}")
         print(f"   Services: {len(business_data.services)} services listed")
         print()
         
-        # Generate prompt
+        # Generate prompt (agentic approach)
         use_llm = not args.no_llm
-        print(f"🚀 Generating prompt (LLM approach: {'data-first' if use_llm else 'template-only'})...")
+        print(f"🚀 Generating prompts (Agentic approach: {'LLM models' if use_llm else 'template-only'})...")
         
-        generated_prompt = generator.generate_agent_prompt(business_data, business_input_text, use_llm_refinement=use_llm)
+        generated_prompts = generator.generate_agent_prompt(business_data, business_input_text, use_llm_refinement=use_llm, include_calendar=args.calendar, model=args.model)
         
         # Save to output directory
-        output_path = generator.save_prompt_to_output_directory(generated_prompt, args.tenant)
+        output_path = generator.save_prompts_to_output_directory(generated_prompts, args.tenant)
         
         print()
         print("🎉 Prompt generation completed successfully!")
